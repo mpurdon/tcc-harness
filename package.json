@@ -1,0 +1,26 @@
+{
+  "name": "tcc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "tcc — a Bedrock-powered pi harness for terminal coding",
+  "bin": {
+    "tcc": "bin/tcc"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "smoke": "bin/tcc --print 'Say hi from tcc.'",
+    "install:global": "./install.sh",
+    "uninstall:global": "npm unlink -g tcc"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "typebox": "^1.1.24"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}
