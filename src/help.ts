@@ -30,6 +30,7 @@ const TCC_TOOLS: { name: string; summary: string }[] = [
 	{ name: "git_diff_preview", summary: "git diff with per-file truncation" },
 	{ name: "memory_save / _recall / _search / _list / _forget", summary: "persistent memory" },
 	{ name: "screenshot", summary: "macOS screencapture → image (full / selection / window)" },
+	{ name: "watch_pr / watch_run / watch_list / watch_stop", summary: "agent-callable background watches for PRs/workflow runs (same backing as /tcc:watch)" },
 	{ name: "search_text", summary: "ripgrep wrapper (respects .gitignore, smart-case)" },
 ];
 
