@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+# tcc — Bedrock-powered pi harness for terminal coding.
+set -euo pipefail
+
+# Resolve TCC_HOME from this script's location (follow symlinks so ~/bin/tcc → repo works).
+SCRIPT_PATH="$0"
+while [ -L "$SCRIPT_PATH" ]; do
+  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+  case "$SCRIPT_PATH" in /*) ;; *) SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$SCRIPT_PATH" ;; esac
+done
+TCC_HOME="${TCC_HOME:-$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)}"
+export TCC_HOME
+
+# Resolve node + pi to absolute paths up-front. The wrapper is sometimes invoked
+# from environments (login shells without nvm sourced, cron, scripts) that lack
+# our nvm bin on PATH; without this `exec pi` and `node -e` would fail with
+# 'command not found' even though both binaries exist on disk.
+NODE_BIN="${TCC_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
+if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
+  echo "tcc: 'node' not found on PATH. Install Node.js (or 'nvm use') and retry." >&2
+  echo "     workaround: TCC_NODE_BIN=/abs/path/to/node tcc …" >&2
+  exit 1
+fi
+# Resolve PI_BIN in this order so multi-node-manager setups (nvm + fnm + brew + volta)
+# don't trip us up. Each candidate is `[ -x ]`-checked; first match wins.
+PI_BIN="${TCC_PI_BIN:-}"
+if [ -n "$PI_BIN" ] && [ ! -x "$PI_BIN" ]; then
+  echo "tcc: TCC_PI_BIN='$PI_BIN' is not executable" >&2
+  exit 1
+fi
+if [ -z "$PI_BIN" ]; then
+  for candidate in \
+    "$(dirname "$NODE_BIN")/pi" \
+    "$(command -v pi 2>/dev/null || true)" \
+    "$HOME"/.nvm/versions/node/*/bin/pi \
+    "$HOME"/.local/share/fnm/node-versions/*/installation/bin/pi \
+    "$HOME"/.local/state/fnm_multishells/*/bin/pi \
+    "$HOME"/.volta/bin/pi \
+    /opt/homebrew/bin/pi \
+    /usr/local/bin/pi \
+    "$HOME"/.local/bin/pi
+  do
+    if [ -x "$candidate" ]; then
+      PI_BIN="$candidate"
+      break
+    fi
+  done
+fi
+if [ -z "$PI_BIN" ] || [ ! -x "$PI_BIN" ]; then
+  echo "tcc: 'pi' binary not found anywhere. Install with:" >&2
+  echo "     npm i -g @earendil-works/pi-coding-agent" >&2
+  echo "     workaround: TCC_PI_BIN=/abs/path/to/pi tcc …" >&2
+  echo "     (current node: $NODE_BIN)" >&2
+  exit 1
+fi
+export TCC_NODE_BIN="$NODE_BIN" TCC_PI_BIN="$PI_BIN"
+
+# Resolve the AWS profile we'll use for Bedrock. The settings file is the source of truth;
+# fall back to the conventional name so `tcc login` works even before init has populated env.
+# Read ~/.tcc/bedrock.json first; fall back to ~/.claude/trajector-settings.json for users
+# migrating from the pre-public-rename era.
+PROFILE_FROM_SETTINGS="$("$NODE_BIN" -e '
+  const fs = require("node:fs");
+  const candidates = [
+    process.env.HOME + "/.tcc/bedrock.json",
+    process.env.HOME + "/.claude/trajector-settings.json",
+  ];
+  for (const p of candidates) {
+    try {
+      const s = JSON.parse(fs.readFileSync(p, "utf8"));
+      if (s.env && s.env.AWS_PROFILE) { process.stdout.write(s.env.AWS_PROFILE); break; }
+    } catch {}
+  }
+' 2>/dev/null || true)"
+TCC_AWS_PROFILE="${AWS_PROFILE:-${PROFILE_FROM_SETTINGS:-claude-code-bedrock}}"
+
+# Append a single auth event to ~/.tcc/auth-log.jsonl. Best-effort; never blocks.
+log_auth() {
+  local event="$1" profile="$2" source="$3"
+  "$NODE_BIN" -e '
+    try {
+      const fs = require("node:fs"), path = require("node:path");
+      const dir = path.join(process.env.HOME, ".tcc");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(path.join(dir, "auth-log.jsonl"),
+        JSON.stringify({ ts: new Date().toISOString(), event: process.argv[1], profile: process.argv[2], source: process.argv[3] }) + "\n");
+    } catch {}
+  ' "$event" "$profile" "$source" 2>/dev/null || true
+}
+
+# Subcommand dispatch — pi has no clashing subcommands of these names.
+case "${1:-}" in
+  init)
+    shift
+    exec "$NODE_BIN" "${TCC_HOME}/scripts/init.mjs" "$@"
+    ;;
+  mcp)
+    shift
+    exec "$NODE_BIN" "${TCC_HOME}/scripts/mcp.mjs" "$@"
+    ;;
+  login)
+    shift
+    profile="${1:-$TCC_AWS_PROFILE}"
+    echo "tcc: refreshing AWS SSO session for profile '${profile}'…"
+    if aws sso login --profile "${profile}" && aws sts get-caller-identity --profile "${profile}" >/dev/null 2>&1; then
+      mkdir -p "${HOME}/.tcc"
+      rm -f "${HOME}/.tcc/.sso-ok-${profile}"
+      touch "${HOME}/.tcc/.sso-ok-${profile}"
+      log_auth "login_success" "${profile}" "tcc-login"
+      echo "tcc: SSO session valid for '${profile}'."
+      exit 0
+    fi
+    log_auth "login_fail" "${profile}" "tcc-login"
+    echo "tcc: SSO still invalid after login — check the profile config." >&2
+    exit 1
+    ;;
+  auth)
+    shift
+    exec "$NODE_BIN" "${TCC_HOME}/scripts/auth-stats.mjs" "$@"
+    ;;
+  doctor)
+    shift
+    exec "$NODE_BIN" "${TCC_HOME}/scripts/doctor.mjs" "$@"
+    ;;
+  update)
+    shift
+    cd "${TCC_HOME}"
+    git pull --ff-only
+    npm install --silent
+    echo "tcc: updated. Plugin cache will refresh on next session start."
+    exit 0
+    ;;
+esac
+
+# Inherit Bedrock env from ~/.tcc/bedrock.json — single source of truth for
+# AWS profile, region, and inference profile ARNs. Falls back to the legacy
+# ~/.claude/trajector-settings.json for users migrating from earlier versions.
+SETTINGS=""
+for candidate in "${HOME}/.tcc/bedrock.json" "${HOME}/.claude/trajector-settings.json"; do
+  if [ -f "$candidate" ]; then SETTINGS="$candidate"; break; fi
+done
+if [ -z "$SETTINGS" ]; then
+  echo "tcc: missing ~/.tcc/bedrock.json (Bedrock inference profile ARNs) — run 'tcc doctor' for setup help" >&2
+  exit 1
+fi
+
+# Load AWS_PROFILE / AWS_REGION / ANTHROPIC_DEFAULT_*_MODEL into env.
+eval "$("$NODE_BIN" -e '
+  const fs = require("node:fs");
+  const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  for (const [k, v] of Object.entries(s.env || {})) {
+    if (typeof v === "string" && !process.env[k]) {
+      console.log(`export ${k}=${JSON.stringify(v)}`);
+    }
+  }
+' "$SETTINGS")"
+
+# Default model = Sonnet ARN unless caller already passed --model.
+DEFAULT_MODEL="${TCC_DEFAULT_MODEL:-${ANTHROPIC_DEFAULT_SONNET_MODEL:-}}"
+if [ -z "$DEFAULT_MODEL" ]; then
+  echo "tcc: ANTHROPIC_DEFAULT_SONNET_MODEL not set in $SETTINGS" >&2
+  exit 1
+fi
+
+# Detect --model and --print in args.
+HAS_MODEL=0
+IS_PRINT=0
+for a in "$@"; do
+  case "$a" in
+    --model|--model=*) HAS_MODEL=1 ;;
+    --print|-p) IS_PRINT=1 ;;
+  esac
+done
+
+# Auto-update pi to latest patch release (same major.minor). Defaults: enabled,
+# 6h cache between checks, blocking + re-exec on update. Skip in --print mode
+# (don't add latency to scripted/one-shot calls), when explicitly disabled, and
+# when we've just restarted post-update (recursion guard).
+if [ "${TCC_AUTO_UPDATE_PI:-1}" != "0" ] && [ "$IS_PRINT" -ne 1 ] && [ "${TCC_PI_UPDATED:-0}" != "1" ]; then
+  UPDATE_CACHE="${HOME}/.tcc/.pi-update-check"
+  mkdir -p "${HOME}/.tcc"
+  CACHE_AGE=999999
+  if [ -f "$UPDATE_CACHE" ]; then
+    CACHE_AGE=$(($(date +%s) - $(stat -f %m "$UPDATE_CACHE" 2>/dev/null || stat -c %Y "$UPDATE_CACHE" 2>/dev/null || echo 0)))
+  fi
+  if [ "$CACHE_AGE" -gt 21600 ]; then
+    PI_DIR="$(dirname "$PI_BIN")"
+    NPM_BIN="${PI_DIR}/npm"
+    [ ! -x "$NPM_BIN" ] && NPM_BIN="$(command -v npm 2>/dev/null || true)"
+    # pi --version writes to stderr (and may include ANSI codes); grep the first semver out.
+    CURRENT_PI="$("$PI_BIN" --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    if [ -n "$CURRENT_PI" ] && [ -n "$NPM_BIN" ] && [ -x "$NPM_BIN" ]; then
+      # Quick network call; fail-silent on any error so offline doesn't break tcc.
+      LATEST_PI="$("$NPM_BIN" view @earendil-works/pi-coding-agent version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+      if [ -n "$LATEST_PI" ] && [ "$LATEST_PI" != "$CURRENT_PI" ]; then
+        # Patch-only gate: same major.minor, higher patch. Skip beta/rc tags.
+        if "$NODE_BIN" -e '
+          const [c, l] = process.argv.slice(1);
+          const p = (v) => (v.match(/^(\d+)\.(\d+)\.(\d+)$/) || []).slice(1).map(Number);
+          const [cM,cm,cp] = p(c), [lM,lm,lp] = p(l);
+          process.exit(cM === lM && cm === lm && lp > cp ? 0 : 1);
+        ' "$CURRENT_PI" "$LATEST_PI" 2>/dev/null; then
+          echo "[tcc] pi $CURRENT_PI → $LATEST_PI (patch update; ~5s)" >&2
+          if "$NPM_BIN" install -g "@earendil-works/pi-coding-agent@${LATEST_PI}" >&2; then
+            touch "$UPDATE_CACHE"
+            echo "[tcc] pi updated; restarting tcc…" >&2
+            export TCC_PI_UPDATED=1
+            exec "$SCRIPT_PATH" "$@"
+          else
+            echo "[tcc] pi update failed; continuing with $CURRENT_PI" >&2
+          fi
+        fi
+      fi
+      # Refresh the cache even when no update was applied — we successfully checked.
+      touch "$UPDATE_CACHE"
+    fi
+  fi
+fi
+
+# Pre-flight: SSO session must be valid (skip with TCC_SKIP_SSO=1).
+# Successful checks are cached for 1h to avoid a ~300ms `aws sts` call on every invocation.
+# --print mode skips the check entirely — fail fast at the first API call instead.
+# When SSO is expired and we're on a TTY, run `aws sso login` automatically so the user
+# doesn't have to leave tcc; otherwise (CI, --print) fail with the manual instruction.
+if [ "${TCC_SKIP_SSO:-0}" != "1" ] && [ "$IS_PRINT" -ne 1 ]; then
+  SSO_CACHE="${HOME}/.tcc/.sso-ok-${AWS_PROFILE}"
+  mkdir -p "${HOME}/.tcc"
+  if [ -f "$SSO_CACHE" ] && [ "$(($(date +%s) - $(stat -f %m "$SSO_CACHE" 2>/dev/null || stat -c %Y "$SSO_CACHE" 2>/dev/null || echo 0)))" -lt 3600 ]; then
+    : # fresh enough
+  elif aws sts get-caller-identity --profile "${AWS_PROFILE}" >/dev/null 2>&1; then
+    touch "$SSO_CACHE"
+  else
+    rm -f "$SSO_CACHE"
+    log_auth "expired_detected" "${AWS_PROFILE}" "wrapper-preflight"
+    if [ -t 0 ] && [ -t 1 ] && [ "${TCC_AUTO_LOGIN:-1}" = "1" ]; then
+      echo "tcc: AWS SSO session for '${AWS_PROFILE}' missing/expired — running 'aws sso login'…" >&2
+      if aws sso login --profile "${AWS_PROFILE}" && aws sts get-caller-identity --profile "${AWS_PROFILE}" >/dev/null 2>&1; then
+        touch "$SSO_CACHE"
+        log_auth "login_success" "${AWS_PROFILE}" "wrapper-auto"
+      else
+        log_auth "login_fail" "${AWS_PROFILE}" "wrapper-auto"
+        echo "tcc: SSO still invalid after login attempt." >&2
+        exit 1
+      fi
+    else
+      echo "tcc: AWS SSO session for profile '${AWS_PROFILE}' is missing or expired." >&2
+      echo "     run:  tcc login   (or:  aws sso login --profile ${AWS_PROFILE})" >&2
+      exit 1
+    fi
+  fi
+fi
+
+EXTRA=()
+if [ "$HAS_MODEL" -eq 0 ]; then
+  EXTRA+=(--model "$DEFAULT_MODEL")
+fi
+
+mkdir -p "${HOME}/.tcc/sessions"
+
+# Prompt caching on Bedrock. The "Claude" in our display names already enables
+# this in pi-ai, but FORCE_CACHE is belt-and-suspenders in case pi-ai's substring
+# heuristic changes. PI_CACHE_RETENTION=long uses 1-hour cache TTL — interactive
+# sessions almost always span >5min, so the 5x cost premium for the longer TTL
+# is dominated by the savings from cache hits.
+export AWS_BEDROCK_FORCE_CACHE="${AWS_BEDROCK_FORCE_CACHE:-1}"
+export PI_CACHE_RETENTION="${PI_CACHE_RETENTION:-long}"
+
+exec "$PI_BIN" \
+  --provider amazon-bedrock \
+  "${EXTRA[@]}" \
+  --extension "${TCC_HOME}/src/extension.ts" \
+  --append-system-prompt "${TCC_HOME}/prompts/system.md" \
+  --theme "${TCC_HOME}/themes" \
+  --session-dir "${HOME}/.tcc/sessions" \
+  "$@"
