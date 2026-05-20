@@ -11,6 +11,8 @@ const HOME = homedir();
 const TCC_DIR = join(HOME, ".tcc");
 const CONFIG_PATH = join(TCC_DIR, "config.json");
 const MCP_PATH = join(TCC_DIR, "mcp.json");
+const BEDROCK_PATH = join(TCC_DIR, "bedrock.json");
+const LEGACY_BEDROCK_PATH = join(HOME, ".claude", "trajector-settings.json");
 
 const DEFAULT_CONFIG = {
 	// Marketplaces are opt-in. The interactive section below adds entries based on user choice.
@@ -78,9 +80,43 @@ async function pickMarketplaces(rl) {
 	return selected;
 }
 
+// Bedrock settings template — the user has to fill in real ARNs to actually use tcc.
+// We populate placeholders rather than leaving them empty so the JSON is valid and the
+// shape is obvious, and we drop a _setup comment so the file self-documents on first read.
+function bedrockTemplate(profile, region) {
+	return {
+		_setup: "Fill in the three ANTHROPIC_DEFAULT_*_MODEL ARNs with your Bedrock application inference profiles for Claude Sonnet/Opus/Haiku. See README#first-run for how to create them. Delete this _setup key when done.",
+		env: {
+			AWS_PROFILE: profile,
+			AWS_REGION: region,
+			ANTHROPIC_DEFAULT_SONNET_MODEL: `arn:aws:bedrock:${region}:ACCOUNT_ID:application-inference-profile/SONNET_PROFILE_ID`,
+			ANTHROPIC_DEFAULT_OPUS_MODEL: `arn:aws:bedrock:${region}:ACCOUNT_ID:application-inference-profile/OPUS_PROFILE_ID`,
+			ANTHROPIC_DEFAULT_HAIKU_MODEL: `arn:aws:bedrock:${region}:ACCOUNT_ID:application-inference-profile/HAIKU_PROFILE_ID`,
+		},
+	};
+}
+
+async function bootstrapBedrock(rl) {
+	if (existsSync(BEDROCK_PATH)) {
+		console.log(`\n  bedrock.json: present (${BEDROCK_PATH}) — leaving alone`);
+		return { wrote: false };
+	}
+	if (existsSync(LEGACY_BEDROCK_PATH)) {
+		console.log(`\n  bedrock.json: not present, but legacy ${LEGACY_BEDROCK_PATH} exists and will be used as a fallback — leaving alone`);
+		return { wrote: false };
+	}
+	console.log("\nBedrock settings (~/.tcc/bedrock.json) — required to launch tcc.");
+	const profile = await prompt(rl, "  AWS profile name (matches your ~/.aws/config entry)", "claude-code-bedrock");
+	const region = await prompt(rl, "  AWS region (where your Bedrock inference profiles live)", "us-east-2");
+	writeJson(BEDROCK_PATH, bedrockTemplate(profile, region));
+	console.log(`  bedrock.json: wrote template → ${BEDROCK_PATH}`);
+	console.log("  → still need to fill in the three ANTHROPIC_DEFAULT_*_MODEL ARNs before tcc will launch.");
+	return { wrote: true };
+}
+
 function ssoCheck() {
 	if (!which("aws")) return { ok: false, reason: "aws CLI not installed" };
-	const profile = "claude-code-bedrock";
+	const profile = readJson(BEDROCK_PATH)?.env?.AWS_PROFILE ?? readJson(LEGACY_BEDROCK_PATH)?.env?.AWS_PROFILE ?? "claude-code-bedrock";
 	try {
 		execFileSync("aws", ["sts", "get-caller-identity", "--profile", profile], { stdio: ["ignore", "ignore", "ignore"], timeout: 5_000 });
 		return { ok: true };
@@ -119,6 +155,7 @@ async function main() {
 	const sso = ssoCheck();
 	console.log(`\nAWS SSO (Bedrock): ${sso.ok ? "ok" : `not ready — ${sso.reason}`}`);
 
+	let bedrockBootstrapped = false;
 	if (process.stdout.isTTY && process.stdin.isTTY) {
 		const rl = createInterface({ input: process.stdin, output: process.stdout });
 		try {
@@ -131,6 +168,8 @@ async function main() {
 					console.log(`  config.json: wrote ${selected.length} marketplace(s) → ${CONFIG_PATH}`);
 				}
 			}
+			const bedrockResult = await bootstrapBedrock(rl);
+			bedrockBootstrapped = bedrockResult.wrote;
 			const theme = await prompt(rl, "\nDefault theme (tokyo-night | catppuccin-mocha | gruvbox-dark | dark | light)", "tokyo-night");
 			const shellRc = process.env.SHELL?.includes("zsh") ? `${HOME}/.zshrc` : `${HOME}/.bashrc`;
 			if (await confirm(rl, `Append 'export TCC_DEFAULT_THEME=${theme}' to ${shellRc}?`)) {
@@ -154,11 +193,23 @@ async function main() {
 		}
 	}
 
+	const profileForLogin = readJson(BEDROCK_PATH)?.env?.AWS_PROFILE ?? readJson(LEGACY_BEDROCK_PATH)?.env?.AWS_PROFILE ?? "claude-code-bedrock";
+
 	console.log("\nNext:");
-	console.log("  tcc                  # start a session");
-	console.log("  tcc --print '…'       # one-shot");
-	console.log("  tcc mcp catalog      # add more MCP servers");
-	if (!sso.ok) console.log(`  aws sso login --profile claude-code-bedrock`);
+	if (bedrockBootstrapped) {
+		console.log("  1. Fill in the 3 ANTHROPIC_DEFAULT_*_MODEL ARNs in ~/.tcc/bedrock.json");
+		console.log("     (see https://github.com/mpurdon/tcc-harness#first-run for how to create them)");
+		console.log(`  2. Configure the '${profileForLogin}' AWS SSO profile if you haven't:   aws configure sso`);
+		console.log(`  3. Log in:   aws sso login --profile ${profileForLogin}`);
+		console.log("  4. Verify everything:   tcc doctor");
+		console.log("  5. Start a session:   tcc");
+	} else {
+		console.log("  tcc                  # start a session");
+		console.log("  tcc --print '…'       # one-shot");
+		console.log("  tcc doctor           # verify prerequisites");
+		console.log("  tcc mcp catalog      # add more MCP servers");
+		if (!sso.ok) console.log(`  aws sso login --profile ${profileForLogin}`);
+	}
 }
 
 main().catch((err) => {

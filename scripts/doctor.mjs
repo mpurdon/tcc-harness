@@ -89,15 +89,21 @@ function loadSettings() {
 
 function checkSettingsFile(settings) {
 	if (settings.error) {
-		return record("fail", "settings file", `missing or unreadable at ${settings.path}`, "create ~/.tcc/bedrock.json with { env: { AWS_PROFILE, AWS_REGION, ANTHROPIC_DEFAULT_SONNET_MODEL, ANTHROPIC_DEFAULT_OPUS_MODEL, ANTHROPIC_DEFAULT_HAIKU_MODEL } } — see README.");
+		return record("fail", "settings file", `missing or unreadable at ${settings.path}`, "run `tcc init` to write a template, then follow https://github.com/mpurdon/tcc-harness#first-run to obtain Bedrock inference-profile ARNs.");
 	}
 	const env = settings.json?.env ?? {};
 	const required = ["AWS_PROFILE", "AWS_REGION", "ANTHROPIC_DEFAULT_SONNET_MODEL"];
 	const missing = required.filter((k) => !env[k]);
 	if (missing.length > 0) {
-		return record("fail", "settings file", `${settings.path} missing env keys: ${missing.join(", ")}`, "populate the env block with the required keys");
+		return record("fail", "settings file", `${settings.path} missing env keys: ${missing.join(", ")}`, "populate the env block with the required keys — see https://github.com/mpurdon/tcc-harness#first-run");
 	}
-	const arnCount = ["ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"].filter((k) => env[k]).length;
+	// Catches the "ran tcc init but never filled in real ARNs" state.
+	const arnVals = [env.ANTHROPIC_DEFAULT_SONNET_MODEL, env.ANTHROPIC_DEFAULT_OPUS_MODEL, env.ANTHROPIC_DEFAULT_HAIKU_MODEL];
+	const stillTemplated = arnVals.some((v) => typeof v === "string" && /ACCOUNT_ID|SONNET_PROFILE_ID|OPUS_PROFILE_ID|HAIKU_PROFILE_ID/.test(v));
+	if (stillTemplated) {
+		return record("fail", "settings file", `${settings.path} still contains template placeholders — ARNs not filled in`, "edit ~/.tcc/bedrock.json and replace the placeholder ANTHROPIC_DEFAULT_*_MODEL values with real ARNs — see https://github.com/mpurdon/tcc-harness#first-run");
+	}
+	const arnCount = arnVals.filter(Boolean).length;
 	if (arnCount < 3) {
 		return record("warn", "settings file", `${settings.path} ok but only ${arnCount}/3 Bedrock model ARNs set — model switching will be limited`, "add the remaining ANTHROPIC_DEFAULT_*_MODEL ARNs");
 	}

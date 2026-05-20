@@ -5,14 +5,89 @@ A local coding CLI: [`pi`](https://github.com/badlogic/pi-mono) + AWS Bedrock + 
 ## Install
 
 ```bash
-./install.sh                                  # npm link + PATH hint  (or: npm run install:global)
-tcc init                                      # bootstrap ~/.tcc/ with defaults + auto-detected MCP
-aws sso login --profile claude-code-bedrock   # optional — `tcc` auto-runs this on TTY when expired
-tcc                                           # interactive, from any directory
-tcc --print "Hello"                           # one-shot
+# Primary path — global install from the public repo
+npm install -g github:mpurdon/tcc-harness
+
+# Or — dev/local path if you've cloned this repo
+./install.sh
 ```
 
-Uninstall: `npm run uninstall:global`.
+Either path puts `tcc` on your PATH. The wrapper resolves `pi` (the underlying agent) from the same `node_modules` it was installed into.
+
+After installing, follow [First-run](#first-run) before launching tcc — you need AWS SSO configured and three Bedrock inference-profile ARNs.
+
+## First-run
+
+tcc needs four things before it can launch: the `pi` CLI, an AWS SSO profile with Bedrock access, three Bedrock inference-profile ARNs (one each for Claude Sonnet/Opus/Haiku), and `~/.tcc/bedrock.json` pointing at all of them.
+
+### 1. Install `pi` globally
+
+```bash
+npm install -g @earendil-works/pi-coding-agent
+```
+
+`tcc` is a wrapper around pi; pi must be on your PATH. (Skip this if `which pi` already returns a path.)
+
+### 2. Enable Bedrock + Claude model access in your AWS account
+
+In the AWS console:
+
+1. Go to **Bedrock → Model access** in the region you want to use (e.g. `us-east-2`).
+2. Request access to the **Anthropic Claude** family (Sonnet, Opus, Haiku). Approval is usually instant.
+
+### 3. Create three application inference profiles
+
+You need one inference profile per Claude tier so you can switch between Sonnet / Opus / Haiku at runtime. Easiest path is the AWS console:
+
+1. **Bedrock → Cross-region inference → Application inference profiles → Create**
+2. Pick the Claude model (e.g. Sonnet 4.6), give it a friendly name (e.g. `sonnet`), accept defaults.
+3. Repeat for Opus and Haiku.
+4. Copy each profile's ARN — looks like `arn:aws:bedrock:us-east-2:123456789012:application-inference-profile/abc123`.
+
+### 4. Set up the AWS SSO profile
+
+If you already have a working AWS SSO profile, note its name and skip to step 5. Otherwise:
+
+```bash
+aws configure sso
+# Follow the prompts; pick a profile name like `claude-code-bedrock`.
+# Choose the region from step 2.
+```
+
+Verify:
+
+```bash
+aws sso login --profile claude-code-bedrock
+aws sts get-caller-identity --profile claude-code-bedrock
+```
+
+### 5. Run `tcc init`
+
+```bash
+tcc init
+```
+
+The interactive prompts will offer plugin marketplaces (skip with `n` if you don't have any), then ask for the AWS profile name + region and write a template `~/.tcc/bedrock.json` with placeholder ARNs.
+
+### 6. Fill in the real ARNs
+
+Open `~/.tcc/bedrock.json` and replace the three placeholder `arn:aws:bedrock:...` values under `env` with the ARNs you copied in step 3. Delete the `_setup` comment when done.
+
+### 7. Verify
+
+```bash
+tcc doctor              # checks all prerequisites
+tcc doctor --deep       # also makes a real Bedrock API call to verify reachability
+```
+
+If everything is green:
+
+```bash
+tcc                     # interactive
+tcc --print "hello"     # one-shot
+```
+
+Uninstall: `npm uninstall -g tcc-harness` (npm install path) or `npm run uninstall:global` (local install path).
 
 ## Subcommands
 
