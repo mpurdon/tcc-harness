@@ -19,6 +19,7 @@ import repoStatusExtension from "./repo-status.ts";
 import retroExtension from "./retro.ts";
 import screenshotExtension from "./screenshot.ts";
 import shareExtension from "./share.ts";
+import watchExtension from "./watch.ts";
 import oneLastPassExtension from "./one-last-pass.ts";
 import pluginAdminExtension from "./plugin-admin.ts";
 import subagentsExtension from "./subagents.ts";
@@ -50,6 +51,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 	authStatsExtension(pi);
 	retroExtension(pi);
 	shareExtension(pi);
+	watchExtension(pi);
 	const { mcpServers } = await pluginsExtension(pi);
 	pluginAdminExtension(pi);
 	await mcpExtension(pi, mcpServers);
