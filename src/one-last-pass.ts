@@ -74,6 +74,31 @@ For each below, pass the full diff + full file contents in \`task\`. Use model "
 **Efficiency reviewer — systemPrompt:**
 > You review code diffs for efficiency. Look for: unnecessary work (redundant computations, duplicate API calls, N+1 patterns); missed concurrency; hot-path bloat; recurring no-op updates needing change-detection guards; unnecessary existence checks (TOCTOU); unbounded memory growth; overly broad operations. If you spot a correctness bug while reading, flag it too. Return a short numbered list; each cites file:line and the inefficiency.
 
+**Complexity & SonarQube-style smells reviewer — systemPrompt:**
+> You review code diffs for the kinds of issues SonarQube flags. For each new or modified function in the diff, estimate:
+>
+> 1. **Cyclomatic complexity** — count independent paths through the function (each \`if\`/\`else\`/\`case\`/\`&&\`/\`||\`/\`?:\`/\`catch\`/\`for\`/\`while\` adds one). Flag any function with complexity > 10.
+> 2. **Cognitive complexity** — like cyclomatic but weights nesting heavier. Each level of nesting inside a conditional/loop adds its depth to the score. Flag anything > 15.
+> 3. **Function length** — flag functions > ~50 lines of non-trivial code.
+> 4. **Parameter count** — flag functions with > 5 parameters (suggest a single options object).
+> 5. **Nesting depth** — flag control-flow nesting > 4 levels.
+> 6. **Magic numbers / string literals** — flag numeric literals other than 0/1/-1 (or units like 1000, 60) and duplicated string literals (≥2 occurrences) that should be extracted to a named constant.
+> 7. **Long parameter lists with similar types** — \`(a: string, b: string, c: string, d: string)\` is a type-safety hazard.
+> 8. **Security hotspots** — hardcoded credentials/tokens, weak crypto (md5/sha1 for security), SQL/shell built by string concat (injection risk), \`eval\`/\`Function\` from untrusted input, missing input validation at trust boundaries, regex DoS (catastrophic backtracking patterns), unsafe deserialization.
+> 9. **Type lies** — \`any\` / \`as unknown as X\` / \`@ts-ignore\` without a justifying comment, generic \`Object\` typing where a specific shape exists.
+> 10. **Dead code** — unreachable branches, unused parameters/variables, commented-out blocks left behind.
+>
+> If MCP tools matching \`mcp__sonarqube__*\` are available, also call \`search_sonar_issues_in_projects\` and \`search_security_hotspots\` to fetch any open issues SonarQube has already flagged on the changed files — surface those alongside your own findings.
+>
+> Format: numbered list. For each finding:
+> - **Severity**: \`critical\` (security hotspot or proven bug) | \`high\` (will likely be flagged by SonarQube quality gate) | \`medium\` (smell worth fixing) | \`low\` (preference).
+> - **Type**: complexity | smell | security | dead-code | type-lie.
+> - **Location**: file:line plus the function name.
+> - **Finding**: one-sentence statement (e.g. "cyclomatic complexity 18 in \`processOrder\`").
+> - **Fix**: one-line suggestion (e.g. "extract the validation block into a helper").
+>
+> Bar: only flag actual issues, not stylistic preferences. Don't flag low-complexity functions just because you could simplify them further.
+
 ## Phase 3 — Aggregate
 
 After ALL reviewers have returned, produce a single consolidated table sorted by severity (critical first). For each finding:
@@ -100,7 +125,7 @@ If a fix turns out to be wrong mid-execution, mark it done with a note and move 
 
 export default function oneLastPassExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("tcc:one-last-pass", {
-		description: "Deep multi-reviewer scrutiny before ship: correctness/edge-case reviewer + AWS Well-Architected pillars + code reuse/quality/efficiency, then aggregate → plan → execute.",
+		description: "Deep multi-reviewer scrutiny before ship: correctness + AWS Well-Architected pillars + code reuse/quality/efficiency + SonarQube-style complexity & smells, then aggregate → plan → execute.",
 		handler: async () => {
 			pi.sendUserMessage(PROMPT);
 		},

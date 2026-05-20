@@ -79,7 +79,27 @@ function resolveModelArn(choice: ModelChoice, currentArn: string | undefined): s
 	return env[choice.toLowerCase()];
 }
 
+// Tools that produce new/changed code in the diff — for these we want a complexity
+// pass in addition to the safety review. bash gets the safety review only (its
+// concerns are side-effects, not source-code complexity).
+const CODE_WRITING_TOOLS = new Set(["write", "edit", "delegate"]);
+
 function reviewerPrompt(toolName: string, args: unknown): string {
+	const isCodeWriting = CODE_WRITING_TOOLS.has(toolName);
+	const complexityCriteria = isCodeWriting
+		? [
+			"",
+			"For code-writing actions (write/edit/delegate), ALSO check the planned code against these complexity & SonarQube-style bars and BLOCK if any are crossed without a clear reason:",
+			"- Cyclomatic complexity > 10 for any new/modified function (count if/else/case/&&/||/?:/catch/for/while branches).",
+			"- Cognitive complexity > 15 (nesting weighted: each level deeper inside a conditional/loop adds its depth).",
+			"- Function length > ~50 lines of non-trivial code, OR > 5 parameters (suggest an options object), OR nesting depth > 4.",
+			"- Magic numbers/literals: numeric literals beyond 0/1/-1 or duplicated string literals (≥2 occurrences) that should be named constants.",
+			"- Security hotspots: hardcoded credentials, SQL/shell built by string concat, eval/Function from untrusted input, weak crypto for security purposes, regex with catastrophic backtracking.",
+			"- Type lies: `any`, `as unknown as X`, or `@ts-ignore` without a justifying inline comment.",
+			"",
+			"When blocking on complexity, name the specific bar crossed (e.g. 'cyclomatic ~14 in processOrder; extract validation block').",
+		]
+		: [];
 	return [
 		"You are reviewing a planned coding action an AI agent is about to execute, sanity-check style. The agent has good intent; your job is to catch genuine mistakes before they happen.",
 		"",
@@ -88,10 +108,11 @@ function reviewerPrompt(toolName: string, args: unknown): string {
 		"```",
 		JSON.stringify(args, null, 2).slice(0, 8_000),
 		"```",
+		...complexityCriteria,
 		"",
 		"Reply with exactly one of:",
 		"- `APPROVE` — the action is reasonable and you'd let it proceed.",
-		"- `BLOCK: <one short sentence>` — the action has a clear problem (wrong file, broken syntax, dangerous side effect, contradicts what a sensible coder would do here, or has a much better alternative).",
+		"- `BLOCK: <one short sentence>` — the action has a clear problem (wrong file, broken syntax, dangerous side effect, contradicts what a sensible coder would do here, has a much better alternative, OR crosses a complexity/security bar listed above).",
 		"",
 		"Bar: only block on real issues. When in doubt, APPROVE — you have less context than the main agent and we don't want to be a bottleneck. Do not block on style preferences or 'I would have done it differently.'",
 	].join("\n");
