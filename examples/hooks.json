@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "event": "PostBashCommand",
+      "match": "^git commit\\b",
+      "onlyIfSuccess": true,
+      "actions": [
+        { "type": "slashCommand", "command": "/tcc:since one-last-pass" },
+        { "type": "slashCommand", "command": "/tcc:since security-review" }
+      ]
+    }
+  ]
+}
