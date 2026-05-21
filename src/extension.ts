@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import askExtension from "./ask.ts";
 import authStatsExtension from "./auth-stats.ts";
 import bedrockExtension from "./bedrock.ts";
 import budgetsExtension from "./budgets.ts";
@@ -74,6 +75,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 		retroExtension(pi);
 		shareExtension(pi);
 		watchExtension(pi);
+		askExtension(pi);
 	}
 
 	const { mcpServers } = await pluginsExtension(pi);

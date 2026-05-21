@@ -132,6 +132,14 @@ case "${1:-}" in
     ;;
 esac
 
+# Session subcommands — translated into pi flags so the rest of the wrapper
+# (SSO check, env loading, etc.) still runs. `tcc continue` re-opens the most
+# recent session; `tcc resume` opens pi's interactive session picker.
+case "${1:-}" in
+  continue|cont) shift; set -- --continue "$@" ;;
+  resume) shift; set -- --resume "$@" ;;
+esac
+
 # Inherit Bedrock env from ~/.tcc/bedrock.json — single source of truth for
 # AWS profile, region, and inference profile ARNs. Falls back to the legacy
 # ~/.claude/trajector-settings.json for users migrating from earlier versions.
