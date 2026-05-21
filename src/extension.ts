@@ -5,6 +5,7 @@ import budgetsExtension from "./budgets.ts";
 import checkpointsExtension from "./checkpoints.ts";
 import cliToolsExtension from "./cli-tools.ts";
 import debugExtension from "./debug.ts";
+import freshnessExtension from "./freshness.ts";
 import gitToolsExtension from "./git-tools.ts";
 import helpExtension from "./help.ts";
 import hooksExtension from "./hooks.ts";
@@ -17,6 +18,7 @@ import onboardExtension from "./onboard.ts";
 import permissionsExtension from "./permissions.ts";
 import predictiveContextExtension from "./predictive-context.ts";
 import repoStatusExtension from "./repo-status.ts";
+import researchExtension from "./research.ts";
 import retroExtension from "./retro.ts";
 import screenshotExtension from "./screenshot.ts";
 import shareExtension from "./share.ts";
@@ -55,6 +57,8 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 	subagentsExtension(pi);
 	hooksExtension(pi);
 	loginExtension(pi);
+	researchExtension(pi);
+	freshnessExtension(pi);
 
 	// Slash-command-only or UI-decoration extensions. Print mode never paints a
 	// UI and never reads a slash command, so registering these is wasted work.

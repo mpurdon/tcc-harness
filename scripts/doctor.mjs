@@ -185,6 +185,28 @@ function checkMcpServers() {
 	record("ok", "mcp servers", `${names.length} configured (${names.join(", ")})`);
 }
 
+function checkSecrets() {
+	const path = join(homedir(), ".tcc", "secrets.json");
+	let st;
+	try {
+		st = statSync(path);
+	} catch {
+		return record("ok", "secrets.json", `none (optional — add ${path} with {"TAVILY_API_KEY": "tvly-…"} to enable richer research)`);
+	}
+	let body;
+	try {
+		body = JSON.parse(readFileSync(path, "utf8"));
+	} catch (e) {
+		return record("fail", "secrets.json", `${path} unparseable: ${e.message}`, "fix or delete the file");
+	}
+	const keys = Object.keys(body);
+	const mode = (st.mode & 0o777).toString(8);
+	if (mode !== "600" && mode !== "400") {
+		return record("warn", "secrets.json", `${keys.length} keys, mode ${mode} (recommend 600)`, `chmod 600 ${path}`);
+	}
+	record("ok", "secrets.json", `${keys.length} keys, mode ${mode}`);
+}
+
 function checkTccOnPath() {
 	const tcc = which("tcc");
 	if (!tcc) return record("warn", "tcc on PATH", "not resolvable as bare 'tcc' — running via absolute path", "./install.sh   # to symlink into ~/bin or ~/.local/bin");
@@ -207,6 +229,7 @@ if (!settings.error) {
 	checkBedrockReach(settings);
 }
 checkTccHome();
+checkSecrets();
 checkTccOnPath();
 checkCliTool("rg", "brew install ripgrep   # or apt install ripgrep");
 checkCliTool("fd", "brew install fd        # or apt install fd-find");

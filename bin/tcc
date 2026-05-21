@@ -170,6 +170,32 @@ eval "$("$NODE_BIN" -e '
   }
 ' "$SETTINGS")"
 
+# Optional secrets file — flat { "KEY": "value" } map for third-party API keys
+# (TAVILY_API_KEY, BRAVE_SEARCH_API_KEY, etc). Kept separate from bedrock.json so
+# it can be gitignored, chmod 0600, and rotated without touching model config.
+# Silently skipped if absent. Loose perms trigger a one-line stderr warning so
+# 'oh that's world-readable' is at least visible — non-fatal.
+SECRETS_FILE="${HOME}/.tcc/secrets.json"
+if [ -f "$SECRETS_FILE" ]; then
+  PERMS=$(stat -f %A "$SECRETS_FILE" 2>/dev/null || stat -c %a "$SECRETS_FILE" 2>/dev/null || echo "")
+  if [ -n "$PERMS" ] && [ "$PERMS" != "600" ] && [ "$PERMS" != "400" ]; then
+    echo "tcc: warning — $SECRETS_FILE has mode $PERMS (recommend 600). Fix: chmod 600 $SECRETS_FILE" >&2
+  fi
+  eval "$("$NODE_BIN" -e '
+    const fs = require("node:fs");
+    try {
+      const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      for (const [k, v] of Object.entries(s)) {
+        if (typeof v === "string" && !process.env[k]) {
+          console.log(`export ${k}=${JSON.stringify(v)}`);
+        }
+      }
+    } catch (e) {
+      console.error(`tcc: failed to parse secrets.json: ${e.message}`);
+    }
+  ' "$SECRETS_FILE")"
+fi
+
 # Default model = Sonnet ARN unless caller already passed --model.
 DEFAULT_MODEL="${TCC_DEFAULT_MODEL:-${ANTHROPIC_DEFAULT_SONNET_MODEL:-}}"
 if [ -z "$DEFAULT_MODEL" ]; then
