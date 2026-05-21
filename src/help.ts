@@ -15,7 +15,7 @@ const TCC_COMMANDS: { name: string; summary: string; source: string }[] = [
 	{ name: "/tcc:retro", summary: "ask the agent to propose memories worth saving from this session", source: "retro" },
 	{ name: "/tcc:snapshot", summary: "snapshot this session to HTML at ~/.tcc/shares/ (pi's /share + /export both differ)", source: "share" },
 	{ name: "/tcc:theme", summary: "switch theme live (curated set: tokyo-night, catppuccin-mocha, gruvbox-dark); /tcc:theme save persists", source: "theme" },
-	{ name: "/tcc:plugin", summary: "list/enable/disable marketplace plugins — /tcc:plugin disable <name@marketplace>", source: "plugin-admin" },
+	{ name: "/tcc:plugin", summary: "interactive checklist to toggle marketplace plugins (subcommands list/enable/disable for scripting)", source: "plugin-admin" },
 	{ name: "/tcc:watch", summary: "async background watch of GitHub PRs/workflow runs; widget shows next-check + status; notifies on completion", source: "watch" },
 	{ name: "/tcc:since", summary: "re-run a workflow against changes since the last checkpoint", source: "checkpoints" },
 	{ name: "/tcc:one-last-pass", summary: "deep scrutiny: correctness reviewer + WA-pillars + reuse/quality/efficiency → aggregate → plan → execute", source: "one-last-pass" },

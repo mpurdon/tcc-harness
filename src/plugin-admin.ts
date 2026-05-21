@@ -1,5 +1,7 @@
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { SettingsList } from "@earendil-works/pi-tui";
 import { userConfigDir } from "./config.ts";
 import { enumerateAllPlugins } from "./plugins.ts";
 import { readJson, writeJsonAtomic } from "./util.ts";
@@ -18,30 +20,87 @@ function setEnabled(id: string, enabled: boolean): void {
 	writeJsonAtomic(CONFIG_PATH, cfg);
 }
 
+async function openPicker(ctx: ExtensionContext): Promise<void> {
+	const plugins = await enumerateAllPlugins();
+	if (plugins.length === 0) {
+		ctx.ui.notify("No plugins discovered. Add a marketplace to ~/.tcc/config.json first.", "info");
+		return;
+	}
+	if (!ctx.hasUI) {
+		ctx.ui.notify("/tcc:plugin: no UI available (headless mode). Use /tcc:plugin list / enable / disable instead.", "error");
+		return;
+	}
+
+	// pending[id] = desired enabled state; only ids the user toggled appear here.
+	const pending = new Map<string, boolean>();
+
+	const items = plugins.map((p) => ({
+		id: p.id,
+		label: p.id,
+		description: p.description?.split("\n")[0].slice(0, 120) ?? "(no description)",
+		currentValue: p.enabled ? "enabled" : "disabled",
+		values: ["enabled", "disabled"],
+	}));
+
+	await ctx.ui.custom<void>((_tui, _theme, _keybindings, done) => {
+		return new SettingsList(
+			items,
+			Math.min(items.length, 15),
+			getSettingsListTheme(),
+			(id, newValue) => {
+				pending.set(id, newValue === "enabled");
+			},
+			() => done(undefined),
+		);
+	});
+
+	if (pending.size === 0) {
+		ctx.ui.notify("no plugin changes", "info");
+		return;
+	}
+	const enabled: string[] = [];
+	const disabled: string[] = [];
+	for (const [id, want] of pending) {
+		const before = plugins.find((p) => p.id === id)?.enabled ?? true;
+		if (want === before) continue; // toggled then toggled back
+		setEnabled(id, want);
+		(want ? enabled : disabled).push(id);
+	}
+	if (enabled.length === 0 && disabled.length === 0) {
+		ctx.ui.notify("no net plugin changes", "info");
+		return;
+	}
+	const parts: string[] = [];
+	if (enabled.length > 0) parts.push(`enabled: ${enabled.join(", ")}`);
+	if (disabled.length > 0) parts.push(`disabled: ${disabled.join(", ")}`);
+	ctx.ui.notify(`${parts.join("; ")}. Restart tcc for changes to take effect.`, "info");
+}
+
 export default function pluginAdminExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("tcc:plugin", {
-		description: "Manage which marketplace plugins load. Usage: /tcc:plugin [list|enable <id>|disable <id>] — bare /tcc:plugin lists all.",
+		description: "Toggle marketplace plugins via interactive checklist. Subcommands: list (plain text), enable <id>, disable <id> (scripting).",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/).filter(Boolean);
-			const sub = parts[0]?.toLowerCase() ?? "list";
+			const sub = parts[0]?.toLowerCase();
+
+			if (!sub) {
+				await openPicker(ctx);
+				return;
+			}
 
 			if (sub === "list") {
 				const plugins = await enumerateAllPlugins();
 				if (plugins.length === 0) {
-					ctx.ui.notify(
-						"No plugins discovered. Either no marketplaces are configured (see /tcc:plugin via ~/.tcc/config.json's `marketplaces`) or every marketplace failed to clone.",
-						"info",
-					);
+					ctx.ui.notify("No plugins discovered. Add a marketplace to ~/.tcc/config.json first.", "info");
 					return;
 				}
 				const nameWidth = Math.max(...plugins.map((p) => p.id.length));
-				const lines = ["plugins (write to ~/.tcc/config.json — restart required to take effect):", ""];
+				const lines = ["plugins (toggle with bare `/tcc:plugin` for the interactive picker):", ""];
 				for (const p of plugins) {
 					const flag = p.enabled ? "  enabled " : "  DISABLED";
 					const desc = p.description ? ` — ${p.description.split("\n")[0].slice(0, 80)}` : "";
 					lines.push(`${flag}  ${p.id.padEnd(nameWidth)}${desc}`);
 				}
-				lines.push("", "Toggle with `/tcc:plugin disable <id>` or `/tcc:plugin enable <id>`.");
 				ctx.ui.notify(lines.join("\n"), "info");
 				return;
 			}
@@ -65,7 +124,7 @@ export default function pluginAdminExtension(pi: ExtensionAPI): void {
 				return;
 			}
 
-			ctx.ui.notify(`/tcc:plugin: unknown subcommand '${sub}'. Try: list | enable <id> | disable <id>`, "error");
+			ctx.ui.notify(`/tcc:plugin: unknown subcommand '${sub}'. Try: (bare) | list | enable <id> | disable <id>`, "error");
 		},
 	});
 }
