@@ -90,8 +90,8 @@ function reviewerPrompt(toolName: string, args: unknown): string {
 		? [
 			"",
 			"For code-writing actions (write/edit/delegate), ALSO check the planned code against these complexity & SonarQube-style bars and BLOCK if any are crossed without a clear reason:",
-			"- Cyclomatic complexity > 10 for any new/modified function (count if/else/case/&&/||/?:/catch/for/while branches).",
-			"- Cognitive complexity > 15 (nesting weighted: each level deeper inside a conditional/loop adds its depth).",
+			"- Cyclomatic complexity > 15 for any new/modified function (SonarQube default; count if/else/case/&&/||/?:/catch/for/while branches).",
+			"- Cognitive complexity > 15 (SonarQube default; nesting weighted: each level deeper inside a conditional/loop adds its depth).",
 			"- Function length > ~50 lines of non-trivial code, OR > 5 parameters (suggest an options object), OR nesting depth > 4.",
 			"- Magic numbers/literals: numeric literals beyond 0/1/-1 or duplicated string literals (≥2 occurrences) that should be named constants.",
 			"- Security hotspots: hardcoded credentials, SQL/shell built by string concat, eval/Function from untrusted input, weak crypto for security purposes, regex with catastrophic backtracking.",
