@@ -8,7 +8,9 @@ import { runProcess } from "./util.ts";
 const POLL_TICK_MS = 5_000;
 const RENDER_TICK_MS = 1_000;
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
-const COMPLETED_LINGER_MS = 5 * 60_000;
+const COMPLETED_LINGER_MS = 3 * 60_000;
+
+type AutoStop = "mergeable";
 
 type Kind = "pr" | "run";
 type State = "active" | "completed" | "error";
@@ -28,6 +30,17 @@ interface Watch {
 	 *  Set to the time of the most recent comment on the first poll (so historical
 	 *  comments don't generate notifications). */
 	commentBaseline?: string;
+	/** Opt-in heuristic that auto-flips a watch to completed before MERGED/CLOSED.
+	 *  'mergeable' = state OPEN, mergeable MERGEABLE, no CHANGES_REQUESTED, all checks SUCCESS. */
+	autoStop?: AutoStop;
+}
+
+function isReadyToMerge(pr: PrJson): boolean {
+	if (pr.state !== "OPEN") return false;
+	if (pr.mergeable !== "MERGEABLE") return false;
+	if (pr.reviewDecision === "CHANGES_REQUESTED" || pr.reviewDecision === "REVIEW_REQUIRED") return false;
+	const checks = pr.statusCheckRollup ?? [];
+	return checks.length === 0 || checks.every((c) => (c.conclusion ?? c.state) === "SUCCESS");
 }
 
 const watches = new Map<string, Watch>();
@@ -127,6 +140,10 @@ async function pollOne(w: Watch): Promise<void> {
 			w.state = "completed";
 			w.completedAt = Date.now();
 			uiCtx?.ui.notify(`watch ${w.id}: ${summary.statusLine}`, "info");
+		} else if (w.kind === "pr" && w.autoStop === "mergeable" && w.state === "active" && isReadyToMerge(parsed as PrJson)) {
+			w.state = "completed";
+			w.completedAt = Date.now();
+			uiCtx?.ui.notify(`watch ${w.id}: ✓ ready to merge (auto-stop)`, "info");
 		} else if (stateChanged) {
 			uiCtx?.ui.notify(`watch ${w.id}: ${summary.statusLine}`, "info");
 		}
@@ -220,7 +237,7 @@ function addWatch(w: Watch): void {
 // Result shape shared by slash-command path and pi-tool path.
 type AddResult = { ok: true; id: string; target: string } | { ok: false; error: string };
 
-async function addPrWatch(prRef: string, cwd: string): Promise<AddResult> {
+async function addPrWatch(prRef: string, cwd: string, autoStop?: AutoStop): Promise<AddResult> {
 	let nwo: string | undefined;
 	let num: string;
 	const explicit = prRef.match(/^([^/]+\/[^#]+)#(\d+)$/);
@@ -246,6 +263,7 @@ async function addPrWatch(prRef: string, cwd: string): Promise<AddResult> {
 		state: "active",
 		statusLine: "polling…",
 		cwd,
+		autoStop,
 	});
 	return { ok: true, id, target: `${nwo}#${num}` };
 }
@@ -321,10 +339,11 @@ export default function watchExtension(pi: ExtensionAPI): void {
 
 			if (sub === "pr") {
 				const arg = parts[1];
-				if (!arg) return ctx.ui.notify("/tcc:watch pr: usage `/tcc:watch pr <num>` or `/tcc:watch pr <owner>/<repo>#<num>`", "error");
-				const result = await addPrWatch(arg, ctx.cwd);
+				if (!arg) return ctx.ui.notify("/tcc:watch pr: usage `/tcc:watch pr <num> [mergeable]` (trailing 'mergeable' auto-stops once the PR is ready to merge)", "error");
+				const autoStop = parts[2]?.toLowerCase() === "mergeable" ? "mergeable" : undefined;
+				const result = await addPrWatch(arg, ctx.cwd, autoStop);
 				if (!result.ok) return ctx.ui.notify(`/tcc:watch pr: ${result.error}`, "error");
-				ctx.ui.notify(`watching ${result.target}`, "info");
+				ctx.ui.notify(`watching ${result.target}${autoStop ? " (auto-stops when ready to merge)" : ""}`, "info");
 				return;
 			}
 
@@ -345,15 +364,18 @@ export default function watchExtension(pi: ExtensionAPI): void {
 		name: "watch_pr",
 		label: "Watch PR",
 		description:
-			"Start a background poller for a GitHub pull request. Reports state changes (merged/closed), CI check transitions, review decisions, and any new comments via UI notifications. The user sees a live widget with status and next-check countdown. Use this when the user asks to 'watch a PR', 'tell me when this PR is approved', 'let me know when CI passes', or 'notify me about comments'. Polls every 30s via `gh`.",
+			"Start a background poller for a GitHub pull request. Reports state changes (merged/closed), CI check transitions, review decisions, and any new comments via UI notifications. The user sees a live widget with status and next-check countdown. Use this when the user asks to 'watch a PR', 'tell me when this PR is approved', 'let me know when CI passes', or 'notify me about comments'. Polls every 30s via `gh`. Pass autoStop='mergeable' when the user wants the watch to end as soon as the PR is ready to merge (rather than wait for the actual merge).",
 		parameters: Type.Object({
 			pr: Type.String({ description: "PR reference — bare number (e.g. '123') if in the relevant git repo, or 'owner/repo#num' for any repo." }),
+			autoStop: Type.Optional(Type.String({ description: "Optional. Set to 'mergeable' to auto-stop the watch once the PR is OPEN, mergeable, has no outstanding CHANGES_REQUESTED/REVIEW_REQUIRED, and all checks pass. Default: watch until MERGED/CLOSED." })),
 		}),
 		async execute(_id, params, _signal, _u, ctx) {
 			uiCtx = ctx;
-			const r = await addPrWatch(params.pr, ctx.cwd);
+			const autoStop = params.autoStop === "mergeable" ? "mergeable" : undefined;
+			const r = await addPrWatch(params.pr, ctx.cwd, autoStop);
 			if (!r.ok) return { content: [{ type: "text", text: `watch_pr: ${r.error}` }], details: undefined, isError: true };
-			return { content: [{ type: "text", text: `Now watching ${r.target} (id ${r.id}). The user will be notified on state changes, CI transitions, and new comments. They can also see live status in the widget above the editor.` }], details: undefined };
+			const trailer = autoStop ? " Will auto-stop once the PR is ready to merge." : "";
+			return { content: [{ type: "text", text: `Now watching ${r.target} (id ${r.id}). The user will be notified on state changes, CI transitions, and new comments. They can also see live status in the widget above the editor.${trailer}` }], details: undefined };
 		},
 	});
 
