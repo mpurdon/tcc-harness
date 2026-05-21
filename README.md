@@ -89,6 +89,26 @@ tcc --print "hello"     # one-shot
 
 Uninstall: `npm uninstall -g tcc-harness` (npm install path) or `npm run uninstall:global` (local install path).
 
+## Tips
+
+A few things worth knowing before you're deep in a session.
+
+**Run `tcc doctor --deep` after your first install.** The non-deep run only checks file presence and on-disk shape; `--deep` makes a real Bedrock API call so IAM gaps and inference-profile misconfigurations surface immediately instead of failing on your first real prompt.
+
+**Check `/tcc:cost` mid-session to confirm caching is engaged.** Look for `cacheRead` rising and `cacheWrite` flat after the first turn. If `cacheRead` stays at 0, prompt caching isn't hitting — usually a TCC_DEFAULT_MODEL override or a non-cached system prompt change. A normal 10-turn session reads back ~80% of the system-prompt input cost as cached.
+
+**Use natural language with `watch_pr` / `watch_run` instead of memorizing flags.** "Watch PR 1234 and tell me when CI passes" or "let me know if anyone comments on PR 1234" both work — the agent calls the right tool. The slash command `/tcc:watch` is there for muscle memory; the natural-language path is usually less friction.
+
+**Run `/tcc:retro` at the end of a productive session.** It asks the agent to propose 0–3 memories worth keeping (user preferences, project quirks, feedback patterns). Lower friction than remembering to `/tcc:remember` as you go, and the agent has the full session context.
+
+**Use `/tcc:one-last-pass` before opening a PR.** Spawns 10 reviewers in parallel (correctness + 6 AWS Well-Architected pillars + reuse + quality + efficiency + SonarQube-style complexity) against the current diff, aggregates findings by severity, and executes the high-confidence fixes. Catches what SonarQube would flag *before* you push.
+
+**Turn on `/tcc:mt` for high-stakes work.** Measure-twice mode reviews each `write` / `edit` / `bash` / `delegate` with a second model before it runs. Costs an extra round-trip per gated tool call, but catches complexity violations and silent mistakes the main agent might not flag. `/tcc:mt log` shows the audit trail.
+
+**Bare slash commands open pickers.** `/tcc:theme`, `/tcc:plugin`, `/tcc:permission`, `/tcc:mcp`, `/tcc:mt tools`, `/tcc:mt model` — typing the command with no args opens an interactive checklist or selector. No need to memorize plugin IDs or rule names.
+
+**Per-repo overrides live at `<repo>/.tcc/`.** Memory, hooks, permissions, checkpoints — drop a `.tcc/permissions.json` (or whichever) in any repo to layer rules on top of the global config without polluting `~/.tcc/`.
+
 ## Subcommands
 
 | | |
