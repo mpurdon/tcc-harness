@@ -15,6 +15,7 @@ import pluginsExtension from "./plugins.ts";
 import mcpExtension from "./mcp.ts";
 import onboardExtension from "./onboard.ts";
 import permissionsExtension from "./permissions.ts";
+import predictiveContextExtension from "./predictive-context.ts";
 import repoStatusExtension from "./repo-status.ts";
 import retroExtension from "./retro.ts";
 import screenshotExtension from "./screenshot.ts";
@@ -29,34 +30,50 @@ import themeExtension from "./theme.ts";
 import todoExtension from "./todo.ts";
 import usageExtension from "./usage.ts";
 
+// Detect non-interactive (--print / -p) at module load. Pi has run-mode info on
+// the ExtensionContext at session_start (ctx.hasUI), but extension registration
+// happens before any session, so we read argv directly. This is safe: pi parses
+// the same flags from the same argv we're inspecting.
+const IS_PRINT_MODE = process.argv.includes("--print") || process.argv.includes("-p");
+
 export default async function tcc(pi: ExtensionAPI): Promise<void> {
+	// Always-on: provider, tools, permission gating, memory, hooks, budgets, debug.
+	// These either feed the agent loop directly or guard against destructive actions
+	// — print mode (used by hooks, scripting, /tcc:since) needs them just as much.
 	bedrockExtension(pi);
 	debugExtension(pi);
 	cliToolsExtension(pi);
 	gitToolsExtension(pi);
 	screenshotExtension(pi);
-	themeExtension(pi);
 	usageExtension(pi);
 	budgetsExtension(pi);
 	memoryExtension(pi);
-	todoExtension(pi);
-	repoStatusExtension(pi);
-	onboardExtension(pi);
+	predictiveContextExtension(pi);
 	checkpointsExtension(pi);
 	permissionsExtension(pi);
-	permissionAdminExtension(pi);
 	measureTwiceExtension(pi);
 	subagentsExtension(pi);
-	oneLastPassExtension(pi);
 	hooksExtension(pi);
-	helpExtension(pi);
 	loginExtension(pi);
-	authStatsExtension(pi);
-	retroExtension(pi);
-	shareExtension(pi);
-	watchExtension(pi);
+
+	// Slash-command-only or UI-decoration extensions. Print mode never paints a
+	// UI and never reads a slash command, so registering these is wasted work.
+	if (!IS_PRINT_MODE) {
+		themeExtension(pi);
+		todoExtension(pi);
+		repoStatusExtension(pi);
+		onboardExtension(pi);
+		permissionAdminExtension(pi);
+		oneLastPassExtension(pi);
+		helpExtension(pi);
+		authStatsExtension(pi);
+		retroExtension(pi);
+		shareExtension(pi);
+		watchExtension(pi);
+	}
+
 	const { mcpServers } = await pluginsExtension(pi);
-	pluginAdminExtension(pi);
+	if (!IS_PRINT_MODE) pluginAdminExtension(pi);
 	await mcpExtension(pi, mcpServers);
-	mcpAdminExtension(pi);
+	if (!IS_PRINT_MODE) mcpAdminExtension(pi);
 }
