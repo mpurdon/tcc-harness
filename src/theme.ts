@@ -1,6 +1,8 @@
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getSelectListTheme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { SelectList } from "@earendil-works/pi-tui";
 import { loadConfig, tccHome, userConfigDir } from "./config.ts";
 import { readJson, writeJsonAtomic } from "./util.ts";
 
@@ -27,6 +29,35 @@ function persistTheme(name: string): void {
 	const existing = readJson<Record<string, unknown>>(path) ?? {};
 	existing.theme = name;
 	writeJsonAtomic(path, existing);
+}
+
+async function openThemePicker(ctx: ExtensionContext, names: string[]): Promise<void> {
+	const current = ctx.ui.theme?.name;
+	const items = names.map((n) => ({
+		value: n,
+		label: n === current ? `${n}  (current)` : n,
+		description: "preview by selecting; Enter to apply",
+	}));
+	const picked = await ctx.ui.custom<string | undefined>((_tui, _theme, _kb, done) => {
+		const list = new SelectList(items, Math.min(items.length, 10), getSelectListTheme());
+		// Live-preview as the user moves through the list so they can see each theme.
+		list.onSelectionChange = (item) => {
+			if (item.value !== ctx.ui.theme?.name) ctx.ui.setTheme(item.value);
+		};
+		list.onSelect = (item) => done(item.value);
+		list.onCancel = () => done(undefined);
+		return list;
+	});
+	if (picked === undefined) {
+		// User cancelled — restore the original theme if preview drifted off it.
+		if (current && ctx.ui.theme?.name !== current) ctx.ui.setTheme(current);
+		return;
+	}
+	if (picked === current) {
+		ctx.ui.notify(`already on '${picked}'`, "info");
+		return;
+	}
+	ctx.ui.notify(`theme → ${picked}. Run \`/tcc:theme save\` to persist.`, "info");
 }
 
 export default function themeExtension(pi: ExtensionAPI): void {
@@ -58,18 +89,7 @@ export default function themeExtension(pi: ExtensionAPI): void {
 			}
 
 			if (!cmd) {
-				const current = ctx.ui.theme?.name ?? "(unknown)";
-				ctx.ui.notify(
-					[
-						`current: ${current}`,
-						"",
-						"curated themes (run `/tcc:theme <name>` to switch live):",
-						...names.map((n) => `  - ${n}`),
-						"",
-						"`/tcc:theme save` persists the current pick across sessions.",
-					].join("\n"),
-					"info",
-				);
+				await openThemePicker(ctx, names);
 				return;
 			}
 

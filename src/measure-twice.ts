@@ -1,6 +1,8 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { getSelectListTheme, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { SelectList, SettingsList } from "@earendil-works/pi-tui";
 import { userConfigDir } from "./config.ts";
 import { readJson, runProcess } from "./util.ts";
 
@@ -168,6 +170,68 @@ interface RuntimeState {
 	tools: Set<string>;
 }
 
+// Tools that measure-twice can sensibly gate. Anything outside this set still works
+// via /tcc:mt tools <comma-list> for power users.
+const GATEABLE_TOOLS = ["write", "edit", "bash", "delegate", "delegate_inline"];
+const MODEL_CHOICES = ["same", "sonnet", "opus", "haiku"];
+
+async function openToolsPicker(ctx: ExtensionContext, state: RuntimeState): Promise<void> {
+	if (!ctx.hasUI) {
+		ctx.ui.notify("/tcc:mt tools: no UI (headless). Use `/tcc:mt tools <comma-list>` instead.", "error");
+		return;
+	}
+	const items = GATEABLE_TOOLS.map((name) => ({
+		id: name,
+		label: name,
+		description: `review ${name} calls with the reviewer model before they run`,
+		currentValue: state.tools.has(name) ? "gated" : "skip",
+		values: ["gated", "skip"],
+	}));
+	const pending = new Map<string, boolean>();
+	await ctx.ui.custom<void>((_tui, _theme, _kb, done) => {
+		return new SettingsList(
+			items,
+			Math.min(items.length, 10),
+			getSettingsListTheme(),
+			(id, newValue) => { pending.set(id, newValue === "gated"); },
+			() => done(undefined),
+		);
+	});
+	if (pending.size === 0) {
+		ctx.ui.notify("no measure-twice tool changes", "info");
+		return;
+	}
+	for (const [id, want] of pending) {
+		if (want) state.tools.add(id);
+		else state.tools.delete(id);
+	}
+	ctx.ui.notify(`measure-twice tools: ${[...state.tools].join(", ") || "(none)"}`, "info");
+}
+
+async function openModelPicker(ctx: ExtensionContext, state: RuntimeState): Promise<void> {
+	if (!ctx.hasUI) {
+		ctx.ui.notify("/tcc:mt model: no UI (headless). Use `/tcc:mt model <name>` instead.", "error");
+		return;
+	}
+	const items = MODEL_CHOICES.map((m) => ({
+		value: m,
+		label: m === state.model ? `${m}  (current)` : m,
+		description: m === "same" ? "use whatever the main agent is on" : `force the ${m} tier as reviewer`,
+	}));
+	const picked = await ctx.ui.custom<string | undefined>((_tui, _theme, _kb, done) => {
+		const list = new SelectList(items, items.length, getSelectListTheme());
+		list.onSelect = (item) => done(item.value);
+		list.onCancel = () => done(undefined);
+		return list;
+	});
+	if (!picked || picked === state.model) {
+		ctx.ui.notify(`measure-twice reviewer unchanged: ${state.model}`, "info");
+		return;
+	}
+	state.model = picked;
+	ctx.ui.notify(`measure-twice reviewer: ${state.model}`, "info");
+}
+
 export default function measureTwiceExtension(pi: ExtensionAPI): void {
 	const cfg = loadConfig();
 	const state: RuntimeState = { enabled: cfg.enabled, model: cfg.model, tools: new Set(cfg.tools) };
@@ -202,7 +266,7 @@ export default function measureTwiceExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("tcc:mt", {
-		description: "Measure-twice mode (review each gated tool call with a second model before executing). Usage: /tcc:mt on|off|status|model <name>|tools <list>|log [N]|stats",
+		description: "Measure-twice mode (review each gated tool call with a second model before executing). Usage: /tcc:mt on|off|status|model [name|picker]|tools [list|picker]|log [N]|stats",
 		handler: async (args, ctx) => {
 			const parts = args.trim().split(/\s+/).filter(Boolean);
 			const cmd = parts[0]?.toLowerCase();
@@ -218,7 +282,7 @@ export default function measureTwiceExtension(pi: ExtensionAPI): void {
 			}
 			if (cmd === "model") {
 				if (!parts[1]) {
-					ctx.ui.notify(`measure-twice reviewer: ${state.model}`, "info");
+					await openModelPicker(ctx, state);
 					return;
 				}
 				state.model = parts[1];
@@ -270,7 +334,7 @@ export default function measureTwiceExtension(pi: ExtensionAPI): void {
 			}
 			if (cmd === "tools") {
 				if (parts.length < 2) {
-					ctx.ui.notify(`measure-twice tools: ${[...state.tools].join(",") || "(none)"}`, "info");
+					await openToolsPicker(ctx, state);
 					return;
 				}
 				state.tools = new Set(parts.slice(1).flatMap((p) => p.split(",")).filter(Boolean));
