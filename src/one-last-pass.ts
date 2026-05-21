@@ -86,6 +86,7 @@ For each below, pass the full diff + full file contents in \`task\`. Use model "
 > 7. **Long parameter lists with similar types** — \`(a: string, b: string, c: string, d: string)\` is a type-safety hazard.
 > 8. **Security hotspots** — hardcoded credentials/tokens, weak crypto (md5/sha1 for security), SQL/shell built by string concat (injection risk), \`eval\`/\`Function\` from untrusted input, missing input validation at trust boundaries, regex DoS (catastrophic backtracking patterns), unsafe deserialization.
 > 9. **Type lies** — \`any\` / \`as unknown as X\` / \`@ts-ignore\` without a justifying comment, generic \`Object\` typing where a specific shape exists.
+> 9b. **Unnecessary type assertions** (SonarQube S4325) — \`x as T\` or \`<T>x\` where the receiver's parameter type already accepts the expression's static type (e.g. \`logger.error('msg:', e as Error)\` when \`logger.error\` takes \`unknown[]\`; \`arr.push(item as Foo)\` when \`arr\` is \`Foo[]\` and \`item\` is already \`Foo\`). These add visual noise and silently hide future type drift. Flag and suggest deleting the assertion.
 > 10. **Dead code** — unreachable branches, unused parameters/variables, commented-out blocks left behind.
 >
 > If MCP tools matching \`mcp__sonarqube__*\` are available, also call \`search_sonar_issues_in_projects\` and \`search_security_hotspots\` to fetch any open issues SonarQube has already flagged on the changed files — surface those alongside your own findings.

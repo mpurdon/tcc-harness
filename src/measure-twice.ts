@@ -96,6 +96,7 @@ function reviewerPrompt(toolName: string, args: unknown): string {
 			"- Magic numbers/literals: numeric literals beyond 0/1/-1 or duplicated string literals (≥2 occurrences) that should be named constants.",
 			"- Security hotspots: hardcoded credentials, SQL/shell built by string concat, eval/Function from untrusted input, weak crypto for security purposes, regex with catastrophic backtracking.",
 			"- Type lies: `any`, `as unknown as X`, or `@ts-ignore` without a justifying inline comment.",
+			"- Unnecessary type assertions (SonarQube S4325): `x as T` / `<T>x` where the receiver's parameter type already accepts the expression's static type. Common case: `logger.error('msg:', e as Error)` when the logger accepts `unknown[]` — the `as Error` is a no-op. Suggest deleting.",
 			"",
 			"When blocking on complexity, name the specific bar crossed (e.g. 'cyclomatic ~14 in processOrder; extract validation block').",
 		]
