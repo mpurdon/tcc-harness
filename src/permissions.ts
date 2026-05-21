@@ -15,6 +15,13 @@ interface Rule {
 interface PermissionsFile {
 	rules?: Rule[];
 	defaults?: boolean;
+	/** Names of built-in default rules to skip while keeping the rest active.
+	 *  Use this when you want most defaults but not, say, prefer-ls-tool. */
+	disabledDefaults?: string[];
+}
+
+export function defaultRuleSummaries(): { name: string; action: Action; message: string }[] {
+	return DEFAULT_RULES.map((r) => ({ name: r.name, action: r.action, message: r.message ?? "" }));
 }
 
 type RuleSource = "default" | "global" | "project";
@@ -53,10 +60,11 @@ function compile(rule: Rule, source: RuleSource): CompiledRule | null {
 function loadAndCompile(cwd: string): Map<string, CompiledRule[]> {
 	const { global, project } = loadTccConfig<PermissionsFile>("permissions.json", cwd, "permissions");
 	const defaultsEnabled = (global?.defaults ?? true) && (project?.defaults ?? true);
+	const skipped = new Set([...(global?.disabledDefaults ?? []), ...(project?.disabledDefaults ?? [])]);
 	const ordered: { rule: Rule; source: RuleSource }[] = [
 		...(project?.rules ?? []).map((rule) => ({ rule, source: "project" as const })),
 		...(global?.rules ?? []).map((rule) => ({ rule, source: "global" as const })),
-		...(defaultsEnabled ? DEFAULT_RULES.map((rule) => ({ rule, source: "default" as const })) : []),
+		...(defaultsEnabled ? DEFAULT_RULES.filter((rule) => !skipped.has(rule.name)).map((rule) => ({ rule, source: "default" as const })) : []),
 	];
 
 	const buckets = new Map<string, CompiledRule[]>();

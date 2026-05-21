@@ -20,7 +20,9 @@ import retroExtension from "./retro.ts";
 import screenshotExtension from "./screenshot.ts";
 import shareExtension from "./share.ts";
 import watchExtension from "./watch.ts";
+import mcpAdminExtension from "./mcp-admin.ts";
 import oneLastPassExtension from "./one-last-pass.ts";
+import permissionAdminExtension from "./permission-admin.ts";
 import pluginAdminExtension from "./plugin-admin.ts";
 import subagentsExtension from "./subagents.ts";
 import themeExtension from "./theme.ts";
@@ -42,6 +44,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 	onboardExtension(pi);
 	checkpointsExtension(pi);
 	permissionsExtension(pi);
+	permissionAdminExtension(pi);
 	measureTwiceExtension(pi);
 	subagentsExtension(pi);
 	oneLastPassExtension(pi);
@@ -55,4 +58,5 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 	const { mcpServers } = await pluginsExtension(pi);
 	pluginAdminExtension(pi);
 	await mcpExtension(pi, mcpServers);
+	mcpAdminExtension(pi);
 }
