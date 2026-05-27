@@ -5,6 +5,7 @@ import bedrockExtension from "./bedrock.ts";
 import budgetsExtension from "./budgets.ts";
 import checkpointsExtension from "./checkpoints.ts";
 import cliToolsExtension from "./cli-tools.ts";
+import compactThenExtension from "./compact-then.ts";
 import debugExtension from "./debug.ts";
 import editRecoveryExtension from "./edit-recovery.ts";
 import exitExtension from "./exit.ts";
@@ -75,6 +76,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 		oneLastPassExtension(pi);
 		helpExtension(pi);
 		exitExtension(pi);
+		compactThenExtension(pi);
 		authStatsExtension(pi);
 		retroExtension(pi);
 		shareExtension(pi);

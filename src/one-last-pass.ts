@@ -18,8 +18,14 @@ Do NOT fire all reviewers in one response — Bedrock throttles concurrent calls
 - **Wave 1** (correctness is gating): the inline correctness reviewer + 3 of the named pillar reviewers.
 - **Wave 2**: the remaining 3 named pillar reviewers.
 - **Wave 3**: the 3 inline code-quality reviewers (reuse + quality + efficiency).
-- **Wave 4**: the inline complexity/SonarQube reviewer.
-- **Wave 5** (conditional — only if the diff touches Python + Strands/Bedrock/AWS SDK code): the Strands/Bedrock-specific reviewer below.
+- **Wave 4**: the inline complexity/SonarQube reviewer + (if the Strands/Bedrock trigger fires — see below) the Strands/Bedrock SDK reviewer.
+
+**Strands/Bedrock trigger** — fire the Strands/Bedrock reviewer in Wave 4 if **any** of the following is true for the diff:
+- A \`.py\` file in the diff contains a line matching \`import (strands|boto3|botocore)\` or \`from (strands|boto3|botocore)\`.
+- A \`.py\` file in the diff references \`@tool\`, \`BedrockModel\`, \`Agent(\`, or \`aws_opentelemetry_distro\`.
+- A \`pyproject.toml\` / \`requirements*.txt\` in the diff adds/changes \`strands\`, \`boto3\`, or \`aws-opentelemetry-distro\`.
+
+If none of those match, skip the Strands/Bedrock reviewer and Wave 4 has just SonarQube.
 
 After each wave finishes, glance at the results — if a reviewer failed (timeout/throttle/non-zero exit), re-run that one as a \`delegate_inline\` call with the same systemPrompt (inline calls have proven more reliable in practice). Then continue to the next wave.
 
@@ -31,7 +37,7 @@ Each reviewer's \`task\` MUST include:
 
 Without the full files, reviewers can only critique style — they can't reason about correctness.
 
-### Strands/Bedrock SDK reviewer (Wave 5 — only if diff touches Python + Strands/Bedrock/AWS SDK)
+### Strands/Bedrock SDK reviewer (Wave 4 — only when the Strands/Bedrock trigger above matches)
 
 Use \`delegate_inline\` with model "sonnet".
 

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -81,13 +82,27 @@ function renderWindow(fileLines: string[], centerIdx: number): string {
 	return out.join("\n");
 }
 
+function resolveEditPath(filePath: string, cwd: string): string {
+	// Pi's edit tool resolves `~` internally before reading, but the input we
+	// receive in tool_result is the original (un-expanded) string from the LLM.
+	// Without this we'd resolve `~/foo` against cwd as `<cwd>/~/foo`, fail to
+	// read it, and silently return no recovery hint.
+	if (filePath === "~") return homedir();
+	if (filePath.startsWith("~/")) return resolve(homedir(), filePath.slice(2));
+	return isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
+}
+
 function buildRecoveryHint(filePath: string, cwd: string, edits: NormalizedEdit[]): string | undefined {
-	const absPath = isAbsolute(filePath) ? filePath : resolve(cwd, filePath);
+	const absPath = resolveEditPath(filePath, cwd);
 	let content: string;
 	try {
 		content = readFileSync(absPath, "utf8");
-	} catch {
-		return undefined;
+	} catch (err) {
+		// Surface read failures rather than silently giving up — the LLM is left
+		// with the bare "Could not find the exact text" and no clue why recovery
+		// didn't trigger. One short line is much better than nothing.
+		const msg = err instanceof Error ? err.message : String(err);
+		return `\n\n[tcc edit-recovery] could not read ${absPath} for recovery context: ${msg.slice(0, 200)}. Re-read the file with the read tool to refresh your view.`;
 	}
 	const lines = content.split("\n");
 	const blocks: string[] = [];

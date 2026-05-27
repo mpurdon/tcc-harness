@@ -6,6 +6,7 @@ const TCC_COMMANDS: { name: string; summary: string; source: string }[] = [
 	{ name: "/tcc:auth", summary: "AWS SSO auth history + session-lifetime stats", source: "auth-stats" },
 	{ name: "/tcc:budget", summary: "show cost-budget status; /tcc:budget override or reset session", source: "budgets" },
 	{ name: "/tcc:checkpoint", summary: "list/show/set a workflow checkpoint", source: "checkpoints" },
+	{ name: "/tcc:compact-then", summary: "compact, then send a follow-up prompt when compaction finishes", source: "compact-then" },
 	{ name: "/tcc:cost", summary: "show session cost broken down by model", source: "usage" },
 	{ name: "/tcc:forget", summary: "delete a memory by name", source: "memory" },
 	{ name: "/tcc:sso", summary: "refresh AWS SSO session without leaving tcc (pi's /login is OAuth)", source: "login" },
