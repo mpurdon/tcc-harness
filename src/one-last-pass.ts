@@ -11,9 +11,18 @@ Multi-reviewer deep scrutiny of the current changes. The primary goal is to **fi
 3. In ≤3 sentences, state: what is this change supposed to accomplish? What are the invariants it must preserve? What inputs does it have to handle?
 4. If the diff is empty AND nothing was edited this session, say so and stop.
 
-## Phase 2 — Spawn ALL reviewers in parallel (one response, multiple tool calls)
+## Phase 2 — Spawn reviewers in waves of 3–4 (parallel within each wave)
 
-This phase MUST be a single response containing every \`delegate\` and \`delegate_inline\` call below. Do NOT spawn them one at a time. Each reviewer's \`task\` MUST include:
+Do NOT fire all reviewers in one response — Bedrock throttles concurrent calls to the same inference profile, and a 10-way fan-out reliably loses several reviewers to timeout/throttle errors. Instead spawn in **waves of at most 4 tool calls per response**, suggested grouping:
+
+- **Wave 1** (correctness is gating): the inline correctness reviewer + 3 of the named pillar reviewers.
+- **Wave 2**: the remaining 3 named pillar reviewers.
+- **Wave 3**: the 3 inline code-quality reviewers (reuse + quality + efficiency).
+- **Wave 4**: the inline complexity/SonarQube reviewer.
+
+After each wave finishes, glance at the results — if a reviewer failed (timeout/throttle/non-zero exit), re-run that one as a \`delegate_inline\` call with the same systemPrompt (inline calls have proven more reliable in practice). Then continue to the next wave.
+
+Each reviewer's \`task\` MUST include:
 - The full diff
 - The full contents of every changed file (NOT just the hunks — they need surrounding context)
 - The intent statement you wrote in Phase 1
@@ -124,10 +133,60 @@ Work the TODO list top to bottom. After each fix, mark the item done. After all 
 
 If a fix turns out to be wrong mid-execution, mark it done with a note and move on — do not block the rest of the work.`;
 
+// One-last-pass fans out to ~10 reviewers (correctness + 6 WA pillars + reuse +
+// quality + efficiency + SonarQube). Each one returns a few-kB report that lands
+// in main context. Plus the aggregation table, the TODO list, and the execution
+// phase where the main agent reads/edits files. Empirically this eats 60–120k
+// tokens of headroom in main even on a clean session.
+//
+// BLOCK_HEADROOM: below this, the run is almost guaranteed to overflow during
+//   execution. Refuse to start; tell the user to /compact.
+// WARN_HEADROOM: enough to run but tight — warn so they can /compact if they
+//   were planning to keep working in this session afterward.
+const BLOCK_HEADROOM = 60_000;
+const WARN_HEADROOM = 120_000;
+
+function fmtK(n: number): string {
+	return n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
+}
+
 export default function oneLastPassExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("tcc:one-last-pass", {
 		description: "Deep multi-reviewer scrutiny before ship: correctness + AWS Well-Architected pillars + code reuse/quality/efficiency + SonarQube-style complexity & smells, then aggregate → plan → execute.",
-		handler: async () => {
+		handler: async (_args, ctx) => {
+			// Refuse to fire while a turn is in flight. sendUserMessage from an
+			// extension during streaming surfaces as a cryptic
+			//   Extension "<runtime>" error: Cannot continue from message role: assistant
+			// (or "Agent is already processing") — much friendlier to gate here.
+			if (!ctx.isIdle()) {
+				ctx.ui.notify(
+					"/tcc:one-last-pass: agent is mid-turn — wait for the current response to finish (or hit Ctrl-C), then re-run.",
+					"warning",
+				);
+				return;
+			}
+
+			const usage = ctx.getContextUsage();
+			if (usage && usage.tokens !== null) {
+				const remaining = usage.contextWindow - usage.tokens;
+				const used = `${fmtK(usage.tokens)} / ${fmtK(usage.contextWindow)} (${(usage.percent ?? 0).toFixed(0)}%)`;
+				if (remaining < BLOCK_HEADROOM) {
+					ctx.ui.notify(
+						`/tcc:one-last-pass: context too full — using ${used}, only ${fmtK(remaining)} headroom. ` +
+							`Run /compact and re-run. Needs ~${fmtK(BLOCK_HEADROOM)}+ free for ~10 reviewer reports + execution.`,
+						"error",
+					);
+					return;
+				}
+				if (remaining < WARN_HEADROOM) {
+					ctx.ui.notify(
+						`/tcc:one-last-pass: context is tight — using ${used}, ${fmtK(remaining)} headroom. ` +
+							`Proceeding, but consider /compact first if you want to keep working in this session afterward.`,
+						"warning",
+					);
+				}
+			}
+
 			pi.sendUserMessage(PROMPT);
 		},
 	});

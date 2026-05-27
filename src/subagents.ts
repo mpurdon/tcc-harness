@@ -197,7 +197,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 		parameters: Type.Object({
 			agent: Type.String({ description: "Subagent name (must match an available subagent)." }),
 			task: Type.String({ description: "Standalone task description — include all context the subagent needs; it cannot see this conversation." }),
-			timeoutMs: Type.Optional(Type.Number({ description: "Hard timeout in milliseconds (default 5 min)." })),
+			timeoutMs: Type.Optional(Type.Number({ description: "Hard timeout in milliseconds (default 10 min)." })),
 		}),
 		renderCall: (args, _theme, context) => {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
@@ -234,7 +234,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 					tools: mapTools(agent.tools),
 					cwd: ctx.cwd,
 					signal,
-					timeoutMs: params.timeoutMs ?? 5 * 60_000,
+					timeoutMs: params.timeoutMs ?? 10 * 60_000,
 				});
 				const seconds = ((Date.now() - started) / 1000).toFixed(1);
 				if (result.reason !== "exit" || (result.exitCode !== 0 && result.exitCode !== null)) {
@@ -266,7 +266,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 			task: Type.String({ description: "Standalone task description — include all context (diff, file contents, repo conventions) the subagent needs; it cannot see this conversation." }),
 			model: Type.Optional(Type.String({ description: "Model alias (sonnet|opus|haiku) or full ARN. Defaults to sonnet." })),
 			tools: Type.Optional(Type.Array(Type.String(), { description: "Restrict to a subset of tool names (e.g. ['read','grep','find']). Default: full toolset." })),
-			timeoutMs: Type.Optional(Type.Number({ description: "Hard timeout in milliseconds (default 5 min)." })),
+			timeoutMs: Type.Optional(Type.Number({ description: "Hard timeout in milliseconds (default 10 min)." })),
 		}),
 		renderCall: (args, _theme, context) => {
 			const text = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
@@ -296,7 +296,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 					tools: mapTools(params.tools),
 					cwd: ctx.cwd,
 					signal,
-					timeoutMs: params.timeoutMs ?? 5 * 60_000,
+					timeoutMs: params.timeoutMs ?? 10 * 60_000,
 				});
 				const seconds = ((Date.now() - started) / 1000).toFixed(1);
 				if (result.reason !== "exit" || (result.exitCode !== 0 && result.exitCode !== null)) {

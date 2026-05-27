@@ -6,6 +6,7 @@ import budgetsExtension from "./budgets.ts";
 import checkpointsExtension from "./checkpoints.ts";
 import cliToolsExtension from "./cli-tools.ts";
 import debugExtension from "./debug.ts";
+import exitExtension from "./exit.ts";
 import freshnessExtension from "./freshness.ts";
 import gitToolsExtension from "./git-tools.ts";
 import helpExtension from "./help.ts";
@@ -71,6 +72,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 		permissionAdminExtension(pi);
 		oneLastPassExtension(pi);
 		helpExtension(pi);
+		exitExtension(pi);
 		authStatsExtension(pi);
 		retroExtension(pi);
 		shareExtension(pi);
