@@ -135,6 +135,36 @@ function checkBedrockReach(settings) {
 		return record("fail", "bedrock reach", `list-inference-profiles failed (${msg.slice(0, 100)})`, "check IAM permissions for the SSO role + that Bedrock is enabled in the account");
 	}
 	record("ok", "bedrock reach", `${region}: list-inference-profiles ok`);
+
+	// Validate each configured ARN actually resolves. Catches the case where the
+	// list-call succeeded (perms + reachability are fine) but one specific
+	// inference-profile id in bedrock.json is stale/deleted — the failure mode
+	// that wastes a 10-min subagent timeout per call until users notice.
+	const env = settings.json?.env ?? {};
+	const targets = [
+		["sonnet", env.ANTHROPIC_DEFAULT_SONNET_MODEL],
+		["opus", env.ANTHROPIC_DEFAULT_OPUS_MODEL],
+		["haiku", env.ANTHROPIC_DEFAULT_HAIKU_MODEL],
+	];
+	for (const [alias, arn] of targets) {
+		if (!arn || typeof arn !== "string") continue;
+		const probe = tryExec("aws", ["bedrock", "get-inference-profile", "--profile", profile, "--region", region, "--inference-profile-identifier", arn, "--output", "json"]);
+		if (typeof probe !== "string") {
+			const msg = probe.error?.stderr?.toString().trim().split("\n").pop() ?? "unknown error";
+			record("fail", `arn ${alias}`, `${arn.slice(-24)} unresolvable (${msg.slice(0, 120)})`, `the ARN in ~/.tcc/bedrock.json is stale or missing perms — list options: aws bedrock list-inference-profiles --profile ${profile} --region ${region}`);
+			continue;
+		}
+		try {
+			const info = JSON.parse(probe);
+			if (info.status && info.status !== "ACTIVE") {
+				record("warn", `arn ${alias}`, `${arn.slice(-24)} status=${info.status}`, "switch to an ACTIVE inference-profile in ~/.tcc/bedrock.json");
+			} else {
+				record("ok", `arn ${alias}`, `${info.inferenceProfileName ?? arn.slice(-24)} ACTIVE`);
+			}
+		} catch {
+			record("warn", `arn ${alias}`, `${arn.slice(-24)} returned unparseable response`, "rerun manually: aws bedrock get-inference-profile --inference-profile-identifier <arn>");
+		}
+	}
 }
 
 function checkTccHome() {

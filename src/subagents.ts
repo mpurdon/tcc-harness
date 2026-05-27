@@ -148,6 +148,17 @@ interface SpawnOptions {
 	timeoutMs: number;
 }
 
+// Bedrock errors that won't get better with retries — broken/stale ARN, perms,
+// expired creds, malformed model id. Throttling/ServiceUnavailable are NOT here
+// because they're transient and pi already retries them.
+const BEDROCK_FATAL_PATTERN = /(ResourceNotFoundException|AccessDeniedException|ValidationException|UnrecognizedClientException|InvalidIdentityToken|ExpiredTokenException|UnauthorizedOperation|InvalidSignatureException)/;
+
+// Session-level blacklist of ARNs that already failed-fast with a Bedrock fatal
+// error. Subsequent delegate calls resolving to the same ARN short-circuit
+// instead of repeating the wasted spawn. Cleared on session_start so a config
+// fix takes effect immediately on the next session.
+const brokenModels = new Map<string, string>();
+
 async function spawnPi(opts: SpawnOptions): Promise<{ stdout: string; stderr: string; exitCode: number | null; reason: string }> {
 	const args = [
 		"--print",
@@ -167,8 +178,33 @@ async function spawnPi(opts: SpawnOptions): Promise<{ stdout: string; stderr: st
 	if (opts.tools && opts.tools.length > 0) args.push("--tools", opts.tools.join(","));
 	args.push(opts.task);
 
-	const result = await runProcess({ cmd: "pi", args, cwd: opts.cwd, signal: opts.signal, timeoutMs: opts.timeoutMs });
+	const result = await runProcess({
+		cmd: "pi",
+		args,
+		cwd: opts.cwd,
+		signal: opts.signal,
+		timeoutMs: opts.timeoutMs,
+		fastFailStderrPattern: BEDROCK_FATAL_PATTERN,
+	});
 	return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, reason: result.reason };
+}
+
+function extractBedrockError(stderr: string): string | undefined {
+	const match = stderr.match(BEDROCK_FATAL_PATTERN);
+	if (!match) return undefined;
+	// Grab the line containing the match plus the next line — usually has the AWS message.
+	const lines = stderr.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		if (lines[i].includes(match[0])) {
+			return lines.slice(i, Math.min(i + 2, lines.length)).join(" ").trim().slice(0, 300);
+		}
+	}
+	return match[0];
+}
+
+function shortArn(arn: string): string {
+	const slash = arn.lastIndexOf("/");
+	return slash >= 0 ? arn.slice(slash + 1) : arn.slice(-24);
 }
 
 export default function subagentsExtension(pi: ExtensionAPI): void {
@@ -184,6 +220,7 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		cache.delete(ctx.cwd);
+		brokenModels.clear();
 	});
 
 	pi.registerTool({
@@ -224,6 +261,14 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 					isError: true,
 				};
 			}
+			const cachedFailure = brokenModels.get(model);
+			if (cachedFailure) {
+				return {
+					content: [{ type: "text", text: `subagent '${agent.name}' skipped: model ARN ${shortArn(model)} is blacklisted for this session — earlier call failed with: ${cachedFailure}. Use a different model alias (haiku/opus) or fix the ARN in ~/.tcc/bedrock.json and start a new session.` }],
+					details: undefined,
+					isError: true,
+				};
+			}
 			const started = Date.now();
 			ctx.ui.setStatus("tcc.delegate", `→ ${agent.name}`);
 			try {
@@ -237,6 +282,16 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 					timeoutMs: params.timeoutMs ?? 10 * 60_000,
 				});
 				const seconds = ((Date.now() - started) / 1000).toFixed(1);
+				if (result.reason === "fastFail") {
+					const errSummary = extractBedrockError(result.stderr) ?? "Bedrock fatal error";
+					brokenModels.set(model, errSummary);
+					ctx.ui.notify(`tcc: model ARN ${shortArn(model)} is broken — ${errSummary}. Blacklisted for this session; fix in ~/.tcc/bedrock.json.`, "error");
+					return {
+						content: [{ type: "text", text: `subagent '${agent.name}' failed fast (${seconds}s): ${errSummary}\n\nModel ARN: ${model}\nBlacklisted for this session. Use a different model alias or fix ~/.tcc/bedrock.json.\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],
+						details: undefined,
+						isError: true,
+					};
+				}
 				if (result.reason !== "exit" || (result.exitCode !== 0 && result.exitCode !== null)) {
 					return {
 						content: [{ type: "text", text: `subagent '${agent.name}' ended (${result.reason}, exit ${result.exitCode}) after ${seconds}s.\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],
@@ -285,6 +340,14 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 					isError: true,
 				};
 			}
+			const cachedFailure = brokenModels.get(model);
+			if (cachedFailure) {
+				return {
+					content: [{ type: "text", text: `inline subagent skipped: model ARN ${shortArn(model)} is blacklisted for this session — earlier call failed with: ${cachedFailure}. Pass a different model alias (haiku/opus) or fix the ARN in ~/.tcc/bedrock.json.` }],
+					details: undefined,
+					isError: true,
+				};
+			}
 			const label = params.systemPrompt.split("\n")[0].slice(0, 40);
 			const started = Date.now();
 			ctx.ui.setStatus("tcc.delegate", `→ inline (${label})`);
@@ -299,6 +362,16 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 					timeoutMs: params.timeoutMs ?? 10 * 60_000,
 				});
 				const seconds = ((Date.now() - started) / 1000).toFixed(1);
+				if (result.reason === "fastFail") {
+					const errSummary = extractBedrockError(result.stderr) ?? "Bedrock fatal error";
+					brokenModels.set(model, errSummary);
+					ctx.ui.notify(`tcc: model ARN ${shortArn(model)} is broken — ${errSummary}. Blacklisted for this session; fix in ~/.tcc/bedrock.json.`, "error");
+					return {
+						content: [{ type: "text", text: `inline subagent failed fast (${seconds}s): ${errSummary}\n\nModel ARN: ${model}\nBlacklisted for this session. Pass a different model alias or fix ~/.tcc/bedrock.json.\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],
+						details: undefined,
+						isError: true,
+					};
+				}
 				if (result.reason !== "exit" || (result.exitCode !== 0 && result.exitCode !== null)) {
 					return {
 						content: [{ type: "text", text: `inline subagent ended (${result.reason}, exit ${result.exitCode}) after ${seconds}s.\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],

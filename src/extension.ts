@@ -6,6 +6,7 @@ import budgetsExtension from "./budgets.ts";
 import checkpointsExtension from "./checkpoints.ts";
 import cliToolsExtension from "./cli-tools.ts";
 import debugExtension from "./debug.ts";
+import editRecoveryExtension from "./edit-recovery.ts";
 import exitExtension from "./exit.ts";
 import freshnessExtension from "./freshness.ts";
 import gitToolsExtension from "./git-tools.ts";
@@ -61,6 +62,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 	loginExtension(pi);
 	researchExtension(pi);
 	freshnessExtension(pi);
+	editRecoveryExtension(pi);
 
 	// Slash-command-only or UI-decoration extensions. Print mode never paints a
 	// UI and never reads a slash command, so registering these is wasted work.

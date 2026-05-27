@@ -172,4 +172,33 @@ export default function cliToolsExtension(pi: ExtensionAPI): void {
 	if (rg) registerSearchText(pi, rg);
 	const fd = which("fd");
 	if (fd) registerFindFiles(pi, fd);
+
+	// Pi ships built-in `grep` and `find` tools that mirror the system commands.
+	// When our ripgrep/fd-backed alternatives are available they're strictly
+	// better (gitignore-aware, smart-case, faster), but the LLM keeps reaching
+	// for the built-ins by name — especially after compaction, when the
+	// transcript history that demonstrated `search_text` use has been summarized
+	// away. Pruning them from the active tool set removes them from the system
+	// prompt entirely, so the only way to do content search / file find is via
+	// our tools or bash (which the shell guidance already steers).
+	//
+	// `ls` is intentionally left in place: there's no replacement tool and it's
+	// useful as a low-noise primitive for orientation.
+	//
+	// Opt out with TCC_KEEP_BUILTIN_SEARCH_TOOLS=1 if pi's grep/find are needed
+	// (e.g. on a host without rg/fd, or to A/B compare results).
+	const keepBuiltins = process.env.TCC_KEEP_BUILTIN_SEARCH_TOOLS === "1";
+	if (!keepBuiltins && (rg || fd)) {
+		pi.on("session_start", () => {
+			const disable = new Set<string>();
+			if (rg) disable.add("grep");
+			if (fd) disable.add("find");
+			const current = pi.getActiveTools();
+			const filtered = current.filter((n) => !disable.has(n));
+			if (filtered.length !== current.length) {
+				pi.setActiveTools(filtered);
+				console.error(`[tcc] disabled built-in tools (use search_text/find_files instead): ${[...disable].join(", ")}`);
+			}
+		});
+	}
 }

@@ -66,9 +66,13 @@ export interface RunProcessOptions {
 	signal?: AbortSignal;
 	/** When true, child stdio is inherited (no stdout/stderr capture). Default false. */
 	inheritStdio?: boolean;
+	/** Kill the child early if accumulated stderr matches. Sets reason="fastFail".
+	 *  Useful for long-timeout work that should bail immediately on a known-fatal error
+	 *  (broken model ARN, auth failure, etc.) instead of waiting out the timeout. */
+	fastFailStderrPattern?: RegExp;
 }
 
-export type RunReason = "exit" | "timeout" | "abort" | "spawnError";
+export type RunReason = "exit" | "timeout" | "abort" | "spawnError" | "fastFail";
 
 export interface RunResult {
 	stdout: string;
@@ -96,36 +100,48 @@ export function runProcess(opts: RunProcessOptions): Promise<RunResult> {
 		let stderr = "";
 		let reason: RunReason = "exit";
 
+		let killTimer: NodeJS.Timeout | undefined;
+		const killHard = () => {
+			killTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+		};
+
 		if (!opts.inheritStdio) {
 			child.stdout?.on("data", (d) => {
 				stdout += d.toString();
 			});
 			child.stderr?.on("data", (d) => {
 				stderr += d.toString();
+				if (reason === "exit" && opts.fastFailStderrPattern?.test(stderr)) {
+					reason = "fastFail";
+					child.kill("SIGTERM");
+					killHard();
+				}
 			});
 		}
 
 		const softTimer = setTimeout(() => {
 			reason = "timeout";
 			child.kill("SIGTERM");
-			setTimeout(() => child.kill("SIGKILL"), 5_000);
+			killHard();
 		}, timeoutMs);
 
 		const onAbort = () => {
 			reason = "abort";
 			child.kill("SIGTERM");
-			setTimeout(() => child.kill("SIGKILL"), 5_000);
+			killHard();
 		};
 		opts.signal?.addEventListener("abort", onAbort, { once: true });
 
 		child.on("error", (err) => {
 			clearTimeout(softTimer);
+			if (killTimer) clearTimeout(killTimer);
 			opts.signal?.removeEventListener("abort", onAbort);
 			stderr += `\n${err.message}`;
 			resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: null, signal: null, reason: reason === "exit" ? "spawnError" : reason });
 		});
 		child.on("close", (code, sig) => {
 			clearTimeout(softTimer);
+			if (killTimer) clearTimeout(killTimer);
 			opts.signal?.removeEventListener("abort", onAbort);
 			resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code, signal: sig, reason });
 		});
