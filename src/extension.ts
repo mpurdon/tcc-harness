@@ -16,6 +16,7 @@ import hooksExtension from "./hooks.ts";
 import loginExtension from "./login.ts";
 import measureTwiceExtension from "./measure-twice.ts";
 import memoryExtension from "./memory.ts";
+import notifyExtension from "./notify.ts";
 import pluginsExtension from "./plugins.ts";
 import mcpExtension from "./mcp.ts";
 import onboardExtension from "./onboard.ts";
@@ -77,6 +78,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 		helpExtension(pi);
 		exitExtension(pi);
 		compactThenExtension(pi);
+		notifyExtension(pi);
 		authStatsExtension(pi);
 		retroExtension(pi);
 		shareExtension(pi);

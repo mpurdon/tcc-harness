@@ -1,5 +1,6 @@
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { playNotification } from "./notify.ts";
 import { loadTccConfig } from "./util.ts";
 
 type Action = "block" | "confirm" | "warn";
@@ -120,6 +121,9 @@ export default function permissionsExtension(pi: ExtensionAPI): void {
 			if (!ctx.hasUI) {
 				return { block: true, reason: `[${rule.name}] ${why} (no UI for interactive confirm — rerun in interactive tcc to approve)` };
 			}
+			// Fire the desktop notification BEFORE awaiting the confirm dialog —
+			// that's the moment the user needs to come back to the terminal.
+			playNotification("permission", `${rule.name}: ${event.toolName}`);
 			const ok = await ctx.ui.confirm(`tcc: confirm ${rule.name}`, `${why}\n\nCommand: ${text.length > 200 ? `${text.slice(0, 200)}…` : text}`);
 			if (!ok) return { block: true, reason: `[${rule.name}] declined by user` };
 			return;

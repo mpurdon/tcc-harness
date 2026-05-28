@@ -153,13 +153,29 @@ interface SpawnOptions {
 // because they're transient and pi already retries them.
 const BEDROCK_FATAL_PATTERN = /(ResourceNotFoundException|AccessDeniedException|ValidationException|UnrecognizedClientException|InvalidIdentityToken|ExpiredTokenException|UnauthorizedOperation|InvalidSignatureException)/;
 
+// Bedrock errors that DO get better with retries — throttling, transient 5xx,
+// model-stream stutters. When we see one in stderr after a non-zero exit, we
+// silently retry once with a brief delay before bubbling failure to the LLM.
+const BEDROCK_TRANSIENT_PATTERN = /(ThrottlingException|TooManyRequestsException|ServiceUnavailableException|InternalServerException|ModelStreamErrorException|ModelTimeoutException)/;
+
+const TRANSIENT_RETRY_DELAY_MS = 5_000;
+
 // Session-level blacklist of ARNs that already failed-fast with a Bedrock fatal
 // error. Subsequent delegate calls resolving to the same ARN short-circuit
 // instead of repeating the wasted spawn. Cleared on session_start so a config
 // fix takes effect immediately on the next session.
 const brokenModels = new Map<string, string>();
 
-async function spawnPi(opts: SpawnOptions): Promise<{ stdout: string; stderr: string; exitCode: number | null; reason: string }> {
+interface SpawnPiResult {
+	stdout: string;
+	stderr: string;
+	exitCode: number | null;
+	reason: string;
+	/** How many spawn attempts produced this result (1 = no retry, 2 = one retry). */
+	attempts: number;
+}
+
+async function spawnPiOnce(opts: SpawnOptions): Promise<{ stdout: string; stderr: string; exitCode: number | null; reason: string }> {
 	const args = [
 		"--print",
 		"--no-session",
@@ -189,6 +205,43 @@ async function spawnPi(opts: SpawnOptions): Promise<{ stdout: string; stderr: st
 	return { stdout: result.stdout, stderr: result.stderr, exitCode: result.exitCode, reason: result.reason };
 }
 
+function shouldRetry(result: { reason: string; exitCode: number | null; stderr: string }, signal: AbortSignal | undefined): boolean {
+	if (signal?.aborted) return false;
+	// Don't retry success, abort, fastFail (already known fatal), spawnError
+	// (binary missing won't change), or timeout (already waited the full budget —
+	// the orchestrator should decide whether to re-fire with more time).
+	if (result.reason === "exit" && result.exitCode === 0) return false;
+	if (result.reason === "abort" || result.reason === "fastFail" || result.reason === "spawnError" || result.reason === "timeout") return false;
+	// Only retry exit-with-error if stderr looks like a transient Bedrock issue.
+	return BEDROCK_TRANSIENT_PATTERN.test(result.stderr);
+}
+
+async function spawnPi(opts: SpawnOptions): Promise<SpawnPiResult> {
+	const first = await spawnPiOnce(opts);
+	if (!shouldRetry(first, opts.signal)) {
+		return { ...first, attempts: 1 };
+	}
+	// Brief backoff so we're not racing the same throttle window. Abortable so
+	// Ctrl-C during the sleep still cancels the whole call rather than waiting
+	// out the full delay before discovering the abort.
+	await new Promise<void>((res) => {
+		const t = setTimeout(res, TRANSIENT_RETRY_DELAY_MS);
+		opts.signal?.addEventListener("abort", () => {
+			clearTimeout(t);
+			res();
+		}, { once: true });
+	});
+	if (opts.signal?.aborted) {
+		return { ...first, attempts: 1 };
+	}
+	const second = await spawnPiOnce(opts);
+	// Always report attempt count for transparency, even if the retry also fails.
+	// stderr gets prefixed with the first-attempt error so the LLM (or a human
+	// reading the result) can see what changed between attempts.
+	const prefixedStderr = `[attempt 1 stderr]\n${first.stderr}\n\n[attempt 2 stderr]\n${second.stderr}`;
+	return { ...second, attempts: 2, stderr: prefixedStderr };
+}
+
 function extractBedrockError(stderr: string): string | undefined {
 	const match = stderr.match(BEDROCK_FATAL_PATTERN);
 	if (!match) return undefined;
@@ -205,6 +258,22 @@ function extractBedrockError(stderr: string): string | undefined {
 function shortArn(arn: string): string {
 	const slash = arn.lastIndexOf("/");
 	return slash >= 0 ? arn.slice(slash + 1) : arn.slice(-24);
+}
+
+// Standardized failure trailer. The orchestrator (especially /tcc:one-last-pass)
+// fans out many subagents and should treat any single failure as recoverable —
+// otherwise one flaky reviewer halts the whole investigation. This trailer
+// nudges the LLM toward "note it and proceed" instead of stopping to debug.
+const PRESS_ON =
+	"PRESS ON: this is one subagent failing, not the whole task. Note the gap " +
+	"in your aggregation/summary, continue with the subagents that DID return, " +
+	"and only retry/re-spawn this one if you have a specific hypothesis about " +
+	"why it failed. Do NOT halt the broader investigation on a single failure.";
+
+function describeFailure(label: string, reason: string, exitCode: number | null, seconds: string, attempts: number, stderr: string): string {
+	const attemptsNote = attempts > 1 ? ` after ${attempts} attempts (auto-retried on transient Bedrock error)` : "";
+	const stderrTail = stderr.length > 1500 ? stderr.slice(-1500) : stderr;
+	return `${label} ended (${reason}, exit ${exitCode}) after ${seconds}s${attemptsNote}.\n\n${PRESS_ON}\n\nstderr (tail):\n${stderrTail}`;
 }
 
 export default function subagentsExtension(pi: ExtensionAPI): void {
@@ -287,20 +356,21 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 					brokenModels.set(model, errSummary);
 					ctx.ui.notify(`tcc: model ARN ${shortArn(model)} is broken — ${errSummary}. Blacklisted for this session; fix in ~/.tcc/bedrock.json.`, "error");
 					return {
-						content: [{ type: "text", text: `subagent '${agent.name}' failed fast (${seconds}s): ${errSummary}\n\nModel ARN: ${model}\nBlacklisted for this session. Use a different model alias or fix ~/.tcc/bedrock.json.\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],
+						content: [{ type: "text", text: `subagent '${agent.name}' failed fast (${seconds}s): ${errSummary}\n\nModel ARN: ${model}\nBlacklisted for this session. ${PRESS_ON}\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],
 						details: undefined,
 						isError: true,
 					};
 				}
 				if (result.reason !== "exit" || (result.exitCode !== 0 && result.exitCode !== null)) {
 					return {
-						content: [{ type: "text", text: `subagent '${agent.name}' ended (${result.reason}, exit ${result.exitCode}) after ${seconds}s.\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],
+						content: [{ type: "text", text: describeFailure(`subagent '${agent.name}'`, result.reason, result.exitCode, seconds, result.attempts, result.stderr) }],
 						details: undefined,
 						isError: true,
 					};
 				}
+				const retryNote = result.attempts > 1 ? `  [retried 1x after transient Bedrock error]` : "";
 				return {
-					content: [{ type: "text", text: `[${agent.name} — ${seconds}s]\n\n${result.stdout || "(no output)"}` }],
+					content: [{ type: "text", text: `[${agent.name} — ${seconds}s${retryNote}]\n\n${result.stdout || "(no output)"}` }],
 					details: undefined,
 				};
 			} finally {
@@ -367,20 +437,21 @@ export default function subagentsExtension(pi: ExtensionAPI): void {
 					brokenModels.set(model, errSummary);
 					ctx.ui.notify(`tcc: model ARN ${shortArn(model)} is broken — ${errSummary}. Blacklisted for this session; fix in ~/.tcc/bedrock.json.`, "error");
 					return {
-						content: [{ type: "text", text: `inline subagent failed fast (${seconds}s): ${errSummary}\n\nModel ARN: ${model}\nBlacklisted for this session. Pass a different model alias or fix ~/.tcc/bedrock.json.\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],
+						content: [{ type: "text", text: `inline subagent failed fast (${seconds}s): ${errSummary}\n\nModel ARN: ${model}\nBlacklisted for this session. ${PRESS_ON}\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],
 						details: undefined,
 						isError: true,
 					};
 				}
 				if (result.reason !== "exit" || (result.exitCode !== 0 && result.exitCode !== null)) {
 					return {
-						content: [{ type: "text", text: `inline subagent ended (${result.reason}, exit ${result.exitCode}) after ${seconds}s.\n\nstderr (tail):\n${result.stderr.slice(-1500)}` }],
+						content: [{ type: "text", text: describeFailure("inline subagent", result.reason, result.exitCode, seconds, result.attempts, result.stderr) }],
 						details: undefined,
 						isError: true,
 					};
 				}
+				const retryNote = result.attempts > 1 ? `  [retried 1x after transient Bedrock error]` : "";
 				return {
-					content: [{ type: "text", text: `[inline — ${seconds}s]\n\n${result.stdout || "(no output)"}` }],
+					content: [{ type: "text", text: `[inline — ${seconds}s${retryNote}]\n\n${result.stdout || "(no output)"}` }],
 					details: undefined,
 				};
 			} finally {

@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { playNotification } from "./notify.ts";
 
 // /tcc:compact-then <prompt>
 //
@@ -31,10 +32,15 @@ export default function compactThenExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify(`compacting, then will send: ${prompt.slice(0, 80)}${prompt.length > 80 ? "…" : ""}`, "info");
 			ctx.compact({
 				onComplete: () => {
-					// sendUserMessage is fire-and-forget; pi's runtime wraps it with
-					// a catch that surfaces failures as <runtime> errors, so we
-					// don't need our own .catch() here.
-					pi.sendUserMessage(prompt);
+					playNotification("compact", "compaction finished — running follow-up");
+					// display:false: the user already saw their prompt echoed in
+					// the "compacting, then will send: …" notify above. Showing it
+					// again in the transcript would be noise. The LLM still gets
+					// it via convertToLlm (role:"custom" → role:"user").
+					pi.sendMessage(
+						{ customType: "tcc:compact-then:invocation", content: prompt, display: false },
+						{ triggerTurn: true },
+					);
 				},
 				onError: (err) => {
 					ctx.ui.notify(`/tcc:compact-then: compaction failed (${err.message}). Follow-up prompt not sent.`, "error");

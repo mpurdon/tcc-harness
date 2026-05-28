@@ -21,7 +21,14 @@ export default function retroExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("tcc:retro", {
 		description: "Ask the agent to propose 0–3 memories worth saving from this session (you approve before they're written).",
 		handler: async () => {
-			pi.sendUserMessage(PROMPT);
+			// Custom message with display:false hides the long PROMPT from the
+			// transcript; the LLM still receives it (convertToLlm promotes
+			// role:"custom" → role:"user"). User sees the agent start working
+			// instead of a giant prompt scrolling past first.
+			pi.sendMessage(
+				{ customType: "tcc:retro:invocation", content: PROMPT, display: false },
+				{ triggerTurn: true },
+			);
 		},
 	});
 }

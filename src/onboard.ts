@@ -38,7 +38,13 @@ export default function onboardExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("tcc:onboard", {
 		description: "Scan the current repo, write AGENTS.md, and save project memories.",
 		handler: async () => {
-			pi.sendUserMessage(PROMPT);
+			// Hide the long PROMPT from the transcript via display:false. The LLM
+			// still receives the content because convertToLlm promotes
+			// role:"custom" → role:"user" during the turn.
+			pi.sendMessage(
+				{ customType: "tcc:onboard:invocation", content: PROMPT, display: false },
+				{ triggerTurn: true },
+			);
 		},
 	});
 }

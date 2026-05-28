@@ -19,6 +19,7 @@ const TCC_COMMANDS: { name: string; summary: string; source: string }[] = [
 	{ name: "/tcc:plugin", summary: "interactive checklist to toggle marketplace plugins (subcommands list/enable/disable for scripting)", source: "plugin-admin" },
 	{ name: "/tcc:permission", summary: "checklist to toggle built-in permission rules (block/confirm/warn defaults)", source: "permission-admin" },
 	{ name: "/tcc:mcp", summary: "checklist of MCP catalog servers — toggle to add/remove from ~/.tcc/mcp.json", source: "mcp-admin" },
+	{ name: "/tcc:notify", summary: "desktop-notification sounds + banners; subcommands generate [--force] | voices | test [type] | reload (config: ~/.tcc/notify.json)", source: "notify" },
 	{ name: "/tcc:watch", summary: "async background watch of GitHub PRs/workflow runs; widget shows next-check + status; notifies on completion", source: "watch" },
 	{ name: "/tcc:since", summary: "re-run a workflow against changes since the last checkpoint", source: "checkpoints" },
 	{ name: "/tcc:one-last-pass", summary: "deep scrutiny: correctness reviewer + WA-pillars + reuse/quality/efficiency → aggregate → plan → execute", source: "one-last-pass" },

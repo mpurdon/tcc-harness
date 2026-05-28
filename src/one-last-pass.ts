@@ -27,7 +27,16 @@ Do NOT fire all reviewers in one response — Bedrock throttles concurrent calls
 
 If none of those match, skip the Strands/Bedrock reviewer and Wave 4 has just SonarQube.
 
-After each wave finishes, glance at the results — if a reviewer failed (timeout/throttle/non-zero exit), re-run that one as a \`delegate_inline\` call with the same systemPrompt (inline calls have proven more reliable in practice). Then continue to the next wave.
+### Robustness — never let one failed reviewer stop the investigation
+
+After each wave finishes, glance at the results:
+
+1. **Successful reviewers**: keep their output for aggregation.
+2. **Failed reviewer (timeout / throttle / non-zero exit)**: re-run that ONE reviewer as a \`delegate_inline\` call with the same systemPrompt (inline calls have proven more reliable in practice). The subagent tool already does one silent retry on transient Bedrock errors — if you're seeing a failure here, the retry also failed.
+3. **Failed reviewer, second attempt also failed**: **mark it "reviewer unavailable" in Phase 3's aggregation table and proceed.** Do NOT spawn it a third time. Do NOT halt to debug. Do NOT ask the user what to do.
+4. **More than half the reviewers failed**: still produce the aggregation table with what you have, plus a one-line note at the top: \`Coverage gap: <list of unavailable reviewers> — findings may miss these dimensions.\` The partial review is still useful; the user can re-run failed reviewers in a fresh session if they want.
+
+Continue to the next wave after handling failures. The point is **never let a single subagent failure halt the broader investigation** — partial coverage is always better than no aggregation.
 
 Each reviewer's \`task\` MUST include:
 - The full diff
@@ -240,7 +249,21 @@ export default function oneLastPassExtension(pi: ExtensionAPI): void {
 				}
 			}
 
-			pi.sendUserMessage(PROMPT);
+			// Deliver the multi-thousand-line PROMPT as a custom message with
+			// display:false instead of sendUserMessage(). The LLM still receives
+			// it as a user-role message (convertToLlm in pi-agent-core/harness
+			// promotes role:"custom" → role:"user"), but the TUI skips rendering
+			// the message entirely (interactive-mode.js gates on message.display).
+			// Net effect: the user sees the agent start working immediately,
+			// without the giant prompt scrolling past first.
+			pi.sendMessage(
+				{
+					customType: "tcc:one-last-pass:invocation",
+					content: PROMPT,
+					display: false,
+				},
+				{ triggerTurn: true },
+			);
 		},
 	});
 }
