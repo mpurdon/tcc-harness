@@ -127,23 +127,66 @@ function playSound(sound: string): void {
 	}
 }
 
-function showBanner(type: NotifyType, summary: string | undefined, sound: string): void {
-	// osascript's `display notification` lets us request a system sound name
-	// alongside the banner, but we already play sound via afplay (which works on
-	// any sound the user has stashed in ~/Music or wherever). Skip osascript's
-	// `sound name` to avoid double-playing — let afplay own the audio.
+// Cached at module load: `osascript display notification` always attributes to
+// Script Editor (so clicks open that), but if the user has terminal-notifier
+// installed we can attribute to their actual terminal and clicks bring it
+// forward. `/tcc:notify status` surfaces which backend is active so users know
+// the upgrade path without us nagging on every banner.
+type BannerBackend = { kind: "terminal-notifier"; path: string } | { kind: "osascript" };
+let bannerBackendCache: BannerBackend | undefined;
+
+function detectBannerBackend(): BannerBackend {
+	if (bannerBackendCache) return bannerBackendCache;
+	for (const p of ["/opt/homebrew/bin/terminal-notifier", "/usr/local/bin/terminal-notifier"]) {
+		if (existsSync(p)) {
+			bannerBackendCache = { kind: "terminal-notifier", path: p };
+			return bannerBackendCache;
+		}
+	}
+	bannerBackendCache = { kind: "osascript" };
+	return bannerBackendCache;
+}
+
+// TERM_PROGRAM → bundle id. Used as `-sender` for terminal-notifier so the
+// banner shows the terminal's icon and clicking activates the terminal. If we
+// don't recognize the terminal, omit -sender and terminal-notifier uses its
+// own bundle (still better than Script Editor since clicks are harmless).
+function terminalBundleId(): string | undefined {
+	const t = process.env.TERM_PROGRAM;
+	if (!t) return undefined;
+	const map: Record<string, string> = {
+		WezTerm: "com.github.wez.wezterm",
+		"iTerm.app": "com.googlecode.iterm2",
+		Apple_Terminal: "com.apple.Terminal",
+		vscode: "com.microsoft.VSCode",
+		ghostty: "com.mitchellh.ghostty",
+	};
+	return map[t];
+}
+
+function showBanner(type: NotifyType, summary: string | undefined): void {
 	const title = `tcc — ${type}`;
-	const body = (summary && summary.length > 0 ? summary : type).replace(/"/g, '\\"').slice(0, 200);
+	const body = (summary && summary.length > 0 ? summary : type).slice(0, 200);
+	const backend = detectBannerBackend();
 	try {
-		const child = spawn("/usr/bin/osascript", ["-e", `display notification "${body}" with title "${title}"`], { stdio: "ignore", detached: true });
+		if (backend.kind === "terminal-notifier") {
+			const args = ["-title", title, "-message", body];
+			const sender = terminalBundleId();
+			if (sender) args.push("-sender", sender);
+			const child = spawn(backend.path, args, { stdio: "ignore", detached: true });
+			child.unref();
+			child.on("error", () => undefined);
+			return;
+		}
+		// osascript fallback. Escape embedded quotes; we already truncated body.
+		const escapedBody = body.replace(/"/g, '\\"');
+		const escapedTitle = title.replace(/"/g, '\\"');
+		const child = spawn("/usr/bin/osascript", ["-e", `display notification "${escapedBody}" with title "${escapedTitle}"`], { stdio: "ignore", detached: true });
 		child.unref();
 		child.on("error", () => undefined);
 	} catch {
-		// osascript missing or sandboxed — non-fatal.
+		// osascript / terminal-notifier missing or sandboxed — non-fatal.
 	}
-	// Avoid an unused-arg warning while keeping the signature stable for future
-	// callers who might want to pass a per-event sound override.
-	void sound;
 }
 
 /** Public hook — used by permissions.ts (and could be used by other extensions
@@ -158,7 +201,7 @@ export function playNotification(type: NotifyType, summary?: string): void {
 	lastFiredAt.set(type, now);
 	const sound = cfg.sounds[type];
 	if (sound) playSound(sound);
-	if (cfg.banners) showBanner(type, summary, sound);
+	if (cfg.banners) showBanner(type, summary);
 }
 
 interface GenerateOutcome {
@@ -393,6 +436,15 @@ export default function notifyExtension(pi: ExtensionAPI): void {
 						: runtimeConfig.elevenLabsVoiceId
 						? "voiceId set but ELEVENLABS_API_KEY missing (add to ~/.tcc/secrets.json)"
 						: "(unset — using macOS say)"
+				}`,
+			);
+			const banner = detectBannerBackend();
+			const senderId = terminalBundleId();
+			lines.push(
+				`banner backend: ${
+					banner.kind === "terminal-notifier"
+						? `terminal-notifier${senderId ? ` (clicks → ${senderId})` : " (sender unknown — clicks are harmless)"}`
+						: "osascript (clicks open Script Editor — `brew install terminal-notifier` for nicer click handling)"
 				}`,
 			);
 			lines.push("sounds:");
