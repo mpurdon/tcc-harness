@@ -12,6 +12,17 @@ export interface TccConfig {
 	mcpServers: Record<string, McpServerConfig>;
 	/** Last-selected theme name (persisted by /tcc:theme). Overridden by TCC_DEFAULT_THEME env var. */
 	theme?: string;
+	/** MCP behaviour knobs. */
+	mcp?: McpOptions;
+}
+
+export interface McpOptions {
+	/** Defer MCP tool schemas out of the active tool list; the agent re-activates
+	 *  them on demand via the mcp_find_tools meta-tool. Saves context/cache when many
+	 *  MCP servers are configured. Off by default; TCC_MCP_DEFER_TOOLS=1 also enables. */
+	deferTools?: boolean;
+	/** Only defer when at least this many MCP tools are registered (default 1). */
+	deferThreshold?: number;
 }
 
 export interface McpServerConfig {
@@ -51,6 +62,7 @@ export function loadConfig(): TccConfig {
 			enabledPlugins: raw.enabledPlugins ?? DEFAULTS.enabledPlugins,
 			mcpServers: raw.mcpServers ?? DEFAULTS.mcpServers,
 			theme: raw.theme,
+			mcp: raw.mcp,
 		};
 	} catch (err) {
 		console.error(`[tcc] failed to parse ${path}: ${(err as Error).message} — using defaults`);

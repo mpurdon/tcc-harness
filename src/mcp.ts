@@ -5,7 +5,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { Type, type TSchema } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type McpServerConfig, userConfigDir } from "./config.ts";
+import { loadConfig, type McpServerConfig, userConfigDir } from "./config.ts";
+
+const MCP_TOOL_PREFIX = "mcp__";
+const FIND_TOOLS_NAME = "mcp_find_tools"; // single underscore after mcp → not caught by the prefix filter
 
 interface ManagedServer {
 	name: string;
@@ -411,6 +414,65 @@ function loadGlobalMcp(): Record<string, McpServerConfig> {
 	}
 }
 
+// --- deferred tool loading (opt-in) ---------------------------------------
+// All MCP tool schemas in the active set cost context (and cache) every turn.
+// When enabled, we keep them *registered* but pull every `mcp__*` tool out of
+// the active set at session start; the agent calls mcp_find_tools(query) to
+// re-activate the ones it needs. Mirrors Claude Code's ToolSearch deferral.
+
+function deferConfig(): { enabled: boolean; threshold: number } {
+	const cfg = loadConfig().mcp;
+	const enabled = process.env.TCC_MCP_DEFER_TOOLS === "1" || cfg?.deferTools === true;
+	const threshold = Math.max(1, cfg?.deferThreshold ?? 1);
+	return { enabled, threshold };
+}
+
+function matchesQuery(name: string, description: string, query: string): boolean {
+	const haystack = `${name} ${description}`.toLowerCase();
+	const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+	if (terms.length === 0) return true;
+	return terms.some((t) => haystack.includes(t));
+}
+
+function registerDeferral(pi: ExtensionAPI, threshold: number): void {
+	const mcpToolNames = (): string[] => pi.getAllTools().map((t) => t.name).filter((n) => n.startsWith(MCP_TOOL_PREFIX));
+
+	pi.registerTool({
+		name: FIND_TOOLS_NAME,
+		label: "mcp · find tools",
+		description:
+			"Search deferred MCP tools by keyword and activate the matches so you can call them. MCP tool schemas are hidden by default to save context; call this first with a few keywords (e.g. server name or capability) when you need an MCP tool, then call the activated tool.",
+		parameters: Type.Object({ query: Type.String({ description: "keywords to match against MCP tool names and descriptions" }) }),
+		async execute(_id, params) {
+			const query = (params as { query?: string }).query ?? "";
+			const all = pi.getAllTools().filter((t) => t.name.startsWith(MCP_TOOL_PREFIX));
+			const matched = all.filter((t) => matchesQuery(t.name, t.description ?? "", query));
+			if (matched.length === 0) {
+				const names = all.map((t) => t.name).join(", ") || "(none registered)";
+				return { content: [{ type: "text", text: `No MCP tools matched "${query}". Available: ${names}` }], details: undefined, isError: false };
+			}
+			const active = new Set(pi.getActiveTools());
+			for (const t of matched) active.add(t.name);
+			pi.setActiveTools([...active]);
+			const lines = matched.map((t) => `- ${t.name}: ${t.description ?? ""}`.trim());
+			return { content: [{ type: "text", text: `Activated ${matched.length} MCP tool(s); you can now call them:\n${lines.join("\n")}` }], details: undefined, isError: false };
+		},
+	});
+
+	const applyDeferral = () => {
+		const deferred = mcpToolNames();
+		if (deferred.length < threshold) return;
+		const deferredSet = new Set(deferred);
+		const active = pi.getActiveTools().filter((n) => !deferredSet.has(n));
+		pi.setActiveTools(active);
+		console.error(`[tcc mcp] deferred ${deferred.length} MCP tool(s) from the active set — agent re-activates via ${FIND_TOOLS_NAME}`);
+	};
+	// Apply after each session (start/resume/fork) once tools are registered.
+	pi.on("session_start", () => {
+		applyDeferral();
+	});
+}
+
 export default async function mcpExtension(pi: ExtensionAPI, pluginServers: Record<string, McpServerConfig> = {}): Promise<void> {
 	const servers = new Map<string, ManagedServer>();
 
@@ -426,6 +488,9 @@ export default async function mcpExtension(pi: ExtensionAPI, pluginServers: Reco
 	});
 	process.once("SIGINT", () => void closeAll());
 	process.once("SIGTERM", () => void closeAll());
+
+	const defer = deferConfig();
+	if (defer.enabled) registerDeferral(pi, defer.threshold);
 
 	const all = { ...loadGlobalMcp(), ...pluginServers };
 	const eagerSpawns: Promise<void>[] = [];

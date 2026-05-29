@@ -167,7 +167,7 @@ Cloned from whatever marketplaces are listed in `~/.tcc/config.json` into `plugi
 
 ### MCP
 
-Generic stdio client. **Tools** registered as `mcp__<server>__<tool>`. **Prompts** become slash commands `/mcp__<server>__<prompt>` (positional, whitespace-separated args; the last declared arg soaks up trailing tokens) — matching Claude Code's naming. **Resources** are surfaced as two tools per server that advertises them: `mcp__<server>__list_resources` and `mcp__<server>__read_resource(uri)` (URI-addressed resources don't fit pi's file-path resource discovery, so they're exposed as callable tools instead of `@`-mentions). **Lazy boot** — tools/prompts/resources are cached at `~/.tcc/cache/mcp-tools/<server>-<hash>.json` after the first successful spawn; subsequent startups register everything from cache and only spawn the server on first invocation (~3s startup saving with multiple servers; legacy tools-only caches upgrade transparently). **Auto-restart** — transport close fires exponential backoff (1s → 30s, max 5 attempts). **Shutdown** on `session_shutdown` / `SIGINT` / `SIGTERM`.
+Generic stdio client. **Tools** registered as `mcp__<server>__<tool>`. **Prompts** become slash commands `/mcp__<server>__<prompt>` (positional, whitespace-separated args; the last declared arg soaks up trailing tokens) — matching Claude Code's naming. **Resources** are surfaced as two tools per server that advertises them: `mcp__<server>__list_resources` and `mcp__<server>__read_resource(uri)` (URI-addressed resources don't fit pi's file-path resource discovery, so they're exposed as callable tools instead of `@`-mentions). **Lazy boot** — tools/prompts/resources are cached at `~/.tcc/cache/mcp-tools/<server>-<hash>.json` after the first successful spawn; subsequent startups register everything from cache and only spawn the server on first invocation (~3s startup saving with multiple servers; legacy tools-only caches upgrade transparently). **Auto-restart** — transport close fires exponential backoff (1s → 30s, max 5 attempts). **Shutdown** on `session_shutdown` / `SIGINT` / `SIGTERM`. **Deferred tools** (opt-in via `TCC_MCP_DEFER_TOOLS=1` or `config.json` `mcp.deferTools`) — keeps every `mcp__*` tool registered but removes it from the active set at session start, so its schema doesn't cost context/cache each turn; the agent calls `mcp_find_tools("<keywords>")` to re-activate the ones it needs (Claude Code's ToolSearch deferral). `mcp.deferThreshold` only defers once that many MCP tools are registered.
 
 ### Subagents
 
@@ -258,6 +258,7 @@ Pi-ai inserts Bedrock `cachePoint` blocks on the system prompt and the last user
 | `TCC_AUTO_UPDATE_PI=0` | Disable patch-only auto-update of pi. Default: enabled, 6h cache, blocks once then re-execs. |
 | `TCC_DEBUG=1` | Write per-event JSONL to `~/.tcc/debug/<session>.log`. |
 | `TCC_MEASURE_TWICE=1` | Enable measure-twice mode. |
+| `TCC_MCP_DEFER_TOOLS=1` | Defer MCP tool schemas out of the active tool list (agent re-activates on demand via `mcp_find_tools`). Saves context/cache with many MCP servers. Also settable via `config.json` `mcp.deferTools`. |
 | `PI_CACHE_RETENTION` | Bedrock prompt-cache TTL: `long` (1h, default) or `short` (5min). |
 | `AWS_BEDROCK_FORCE_CACHE=1` | Force `cache_control` on inference-profile ARNs (default on; pi-ai's heuristic wouldn't enable caching otherwise). |
 
@@ -291,7 +292,8 @@ Pi-ai inserts Bedrock `cachePoint` blocks on the system prompt and the last user
     "some-plugin@my-marketplace": false
   },
   "budgets": { "session": 5.00, "daily": 25.00, "mode": "pause" },
-  "measureTwice": { "enabled": false, "model": "opus", "tools": ["write", "edit", "bash"] }
+  "measureTwice": { "enabled": false, "model": "opus", "tools": ["write", "edit", "bash"] },
+  "mcp": { "deferTools": false, "deferThreshold": 1 }
 }
 ```
 
