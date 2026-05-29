@@ -153,7 +153,7 @@ Plus all plugin commands as `/<plugin>:<command>` (e.g. `/employee-portal-plugin
 | `memory_save / _recall / _search / _list / _forget` | Persistent memory CRUD. |
 | `checkpoint_get / checkpoint_set` | Per-repo workflow checkpoints. |
 | `delegate / list_subagents` | Spawn a Claude-Code-style subagent in an isolated context (discovered from `~/.claude/agents/`, `~/.pi/agent/agents/`, and per-repo equivalents). |
-| `mcp__<server>__<tool>` | Any tool from a configured MCP server (dynamic). |
+| `mcp__<server>__<tool>` | Any tool from a configured MCP server (dynamic). Plus `…__list_resources` / `…__read_resource` for servers exposing resources. |
 
 ## Capabilities
 
@@ -167,7 +167,7 @@ Cloned from whatever marketplaces are listed in `~/.tcc/config.json` into `plugi
 
 ### MCP
 
-Generic stdio client. Tools registered as `mcp__<server>__<tool>`. **Lazy boot** — tool descriptors are cached at `~/.tcc/cache/mcp-tools/<server>-<hash>.json` after the first successful spawn; subsequent startups register tools from cache and only spawn the server on first invocation (~3s startup saving with multiple servers). **Auto-restart** — transport close fires exponential backoff (1s → 30s, max 5 attempts). **Shutdown** on `session_shutdown` / `SIGINT` / `SIGTERM`.
+Generic stdio client. **Tools** registered as `mcp__<server>__<tool>`. **Prompts** become slash commands `/mcp__<server>__<prompt>` (positional, whitespace-separated args; the last declared arg soaks up trailing tokens) — matching Claude Code's naming. **Resources** are surfaced as two tools per server that advertises them: `mcp__<server>__list_resources` and `mcp__<server>__read_resource(uri)` (URI-addressed resources don't fit pi's file-path resource discovery, so they're exposed as callable tools instead of `@`-mentions). **Lazy boot** — tools/prompts/resources are cached at `~/.tcc/cache/mcp-tools/<server>-<hash>.json` after the first successful spawn; subsequent startups register everything from cache and only spawn the server on first invocation (~3s startup saving with multiple servers; legacy tools-only caches upgrade transparently). **Auto-restart** — transport close fires exponential backoff (1s → 30s, max 5 attempts). **Shutdown** on `session_shutdown` / `SIGINT` / `SIGTERM`.
 
 ### Subagents
 
