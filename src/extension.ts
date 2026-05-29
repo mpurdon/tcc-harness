@@ -24,6 +24,7 @@ import mcpExtension from "./mcp.ts";
 import onboardExtension from "./onboard.ts";
 import permissionsExtension from "./permissions.ts";
 import predictiveContextExtension from "./predictive-context.ts";
+import recapExtension from "./recap.ts";
 import reloadExtension from "./reload.ts";
 import repoStatusExtension from "./repo-status.ts";
 import researchExtension from "./research.ts";
@@ -85,6 +86,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 		compactThenExtension(pi);
 		contextExtension(pi);
 		reloadExtension(pi);
+		recapExtension(pi);
 		notifyExtension(pi);
 		authStatsExtension(pi);
 		retroExtension(pi);

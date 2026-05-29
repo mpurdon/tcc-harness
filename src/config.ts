@@ -16,6 +16,17 @@ export interface TccConfig {
 	mcp?: McpOptions;
 	/** User-defined extra status-line segment. */
 	statusLine?: StatusLineOptions;
+	/** Rolling session recap widget. */
+	recap?: RecapOptions;
+}
+
+export interface RecapOptions {
+	/** Show the recap widget. On by default; set false (or TCC_RECAP=0) to disable. */
+	enabled?: boolean;
+	/** Regenerate every N agent turns (also on resume). Default 5. */
+	everyTurns?: number;
+	/** Model for recap synthesis (sonnet|opus|haiku|ARN). Default haiku. */
+	model?: string;
 }
 
 export interface StatusLineOptions {
@@ -75,6 +86,7 @@ export function loadConfig(): TccConfig {
 			theme: raw.theme,
 			mcp: raw.mcp,
 			statusLine: raw.statusLine,
+			recap: raw.recap,
 		};
 	} catch (err) {
 		console.error(`[tcc] failed to parse ${path}: ${(err as Error).message} — using defaults`);
