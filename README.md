@@ -240,6 +240,7 @@ Action types: `slashCommand` (auto-prepends `/`), `prompt` (free text), `shell` 
 ### Observability
 
 - Live footer: AWS profile, repo branch + dirty + ahead/behind + last-commit-age, model, token %, session $.
+- Custom status segment: set `statusLine.command` in `config.json` (or `TCC_STATUSLINE_CMD`) to a shell command whose first stdout line is appended to the footer. Refreshes on each turn end and every `statusLine.intervalMs` (min 2s, default 10s). The command gets `TCC_SL_CWD` / `TCC_SL_MODEL` / `TCC_SL_AWS_PROFILE` / `TCC_SL_DOLLARS` in its env.
 - `/tcc:cost` / `/tcc:usage` — per-model breakdown using pi-ai's pre-computed cost.
 - `/tcc:auth` / `tcc auth` — login frequency, session lifetimes, day-of-week histogram.
 - `TCC_DEBUG=1` — append JSONL of session_start, model_select, before_agent_start, turn_start/end, tool_call, tool_result, agent_end, session_shutdown to `~/.tcc/debug/<session-id>.log`.
@@ -275,6 +276,7 @@ Pi-ai inserts Bedrock `cachePoint` blocks on the system prompt and the last user
 | `TCC_DEBUG=1` | Write per-event JSONL to `~/.tcc/debug/<session>.log`. |
 | `TCC_MEASURE_TWICE=1` | Enable measure-twice mode. |
 | `TCC_MCP_DEFER_TOOLS=1` | Defer MCP tool schemas out of the active tool list (agent re-activates on demand via `mcp_find_tools`). Saves context/cache with many MCP servers. Also settable via `config.json` `mcp.deferTools`. |
+| `TCC_STATUSLINE_CMD` | Shell command whose first stdout line is appended to the footer as a custom segment. Also settable via `config.json` `statusLine.command`. |
 | `PI_CACHE_RETENTION` | Bedrock prompt-cache TTL: `long` (1h, default) or `short` (5min). |
 | `AWS_BEDROCK_FORCE_CACHE=1` | Force `cache_control` on inference-profile ARNs (default on; pi-ai's heuristic wouldn't enable caching otherwise). |
 
@@ -309,7 +311,8 @@ Pi-ai inserts Bedrock `cachePoint` blocks on the system prompt and the last user
   },
   "budgets": { "session": 5.00, "daily": 25.00, "mode": "pause" },
   "measureTwice": { "enabled": false, "model": "opus", "tools": ["write", "edit", "bash"] },
-  "mcp": { "deferTools": false, "deferThreshold": 1 }
+  "mcp": { "deferTools": false, "deferThreshold": 1 },
+  "statusLine": { "command": "echo \"⎈ $(kubectl config current-context 2>/dev/null)\"", "intervalMs": 10000 }
 }
 ```
 
@@ -360,6 +363,7 @@ src/onboard.ts          /tcc:onboard prompt template
 src/retro.ts            /tcc:retro prompt template
 src/share.ts            /tcc:snapshot session HTML export (pi owns /share + /export)
 src/theme.ts            apply TCC_DEFAULT_THEME on session start
+src/statusline.ts       user-defined custom footer segment (shell command)
 src/help.ts             /tcc reference
 src/debug.ts            TCC_DEBUG event log
 src/util.ts             readJson + writeJsonAtomic + loadTccConfig + runProcess + logAuthEvent + fmtDollars

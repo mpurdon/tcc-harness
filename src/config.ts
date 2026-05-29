@@ -14,6 +14,17 @@ export interface TccConfig {
 	theme?: string;
 	/** MCP behaviour knobs. */
 	mcp?: McpOptions;
+	/** User-defined extra status-line segment. */
+	statusLine?: StatusLineOptions;
+}
+
+export interface StatusLineOptions {
+	/** Shell command whose first stdout line becomes a status-line segment.
+	 *  Receives TCC_SL_CWD / TCC_SL_MODEL / TCC_SL_AWS_PROFILE / TCC_SL_DOLLARS in env.
+	 *  Also settable via TCC_STATUSLINE_CMD. */
+	command?: string;
+	/** Refresh cadence in ms (min 2000, default 10000). Also refreshes on each turn end. */
+	intervalMs?: number;
 }
 
 export interface McpOptions {
@@ -63,6 +74,7 @@ export function loadConfig(): TccConfig {
 			mcpServers: raw.mcpServers ?? DEFAULTS.mcpServers,
 			theme: raw.theme,
 			mcp: raw.mcp,
+			statusLine: raw.statusLine,
 		};
 	} catch (err) {
 		console.error(`[tcc] failed to parse ${path}: ${(err as Error).message} — using defaults`);

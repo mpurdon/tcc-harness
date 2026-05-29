@@ -30,6 +30,7 @@ import researchExtension from "./research.ts";
 import retroExtension from "./retro.ts";
 import screenshotExtension from "./screenshot.ts";
 import shareExtension from "./share.ts";
+import statuslineExtension from "./statusline.ts";
 import watchExtension from "./watch.ts";
 import mcpAdminExtension from "./mcp-admin.ts";
 import oneLastPassExtension from "./one-last-pass.ts";
@@ -88,6 +89,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 		authStatsExtension(pi);
 		retroExtension(pi);
 		shareExtension(pi);
+		statuslineExtension(pi);
 		watchExtension(pi);
 		askExtension(pi);
 	}
