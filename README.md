@@ -191,9 +191,9 @@ User-defined lifecycle hooks at `~/.tcc/hooks.json` and `<repo>/.tcc/hooks.json`
 {
   "hooks": [
     {
-      "event": "PostBashCommand",            // or "PostToolUse" or "Stop"
-      "match": "^git commit\\b",             // regex (omit for Stop)
-      "onlyIfSuccess": true,                 // default true — skip on tool error
+      "event": "PostBashCommand",            // see event list below
+      "match": "^git commit\\b",             // regex; meaning depends on event
+      "onlyIfSuccess": true,                 // default true — skip on tool error (Post* only)
       "actions": [
         { "type": "slashCommand", "command": "/tcc:since one-last-pass" },
         { "type": "prompt",       "command": "Now write a one-line release note." },
@@ -204,7 +204,20 @@ User-defined lifecycle hooks at `~/.tcc/hooks.json` and `<repo>/.tcc/hooks.json`
 }
 ```
 
-Action types: `slashCommand` (auto-prepends `/`), `prompt` (free text), `shell` (with `CLAUDE_PROJECT_DIR` in env). Ready-to-copy example at `examples/hooks.json`.
+Events (named to match Claude Code, so a CC `hooks.json` mostly drops in):
+
+| `event` | Fires on | `match` tests |
+|---|---|---|
+| `SessionStart` | session begins/resumes | — |
+| `SessionEnd` | session shuts down | — |
+| `UserPromptSubmit` | you submit a prompt (interactive/rpc; hook-injected input is ignored) | prompt text |
+| `PreToolUse` | before a tool runs — a `shell` action that exits non-zero **blocks** the call (its stderr becomes the reason the agent sees) | tool name |
+| `PostToolUse` | after a tool succeeds | tool name |
+| `PostBashCommand` | after a bash tool call | bash command |
+| `PreCompact` / `PostCompact` | around context compaction | — |
+| `Stop` | agent finishes a turn | — |
+
+Action types: `slashCommand` (auto-prepends `/`), `prompt` (free text), `shell` (with `CLAUDE_PROJECT_DIR` in env). For `PreToolUse`, only `shell` actions gate execution; `slashCommand`/`prompt` queue as follow-ups. Ready-to-copy example at `examples/hooks.json`.
 
 ### Observability
 
