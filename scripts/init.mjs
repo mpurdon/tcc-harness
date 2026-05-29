@@ -86,12 +86,22 @@ async function pickMarketplaces(rl) {
 function bedrockTemplate(profile, region) {
 	return {
 		_setup: "Fill in the three ANTHROPIC_DEFAULT_*_MODEL ARNs with your Bedrock application inference profiles for Claude Sonnet/Opus/Haiku. See README#first-run for how to create them. Delete this _setup key when done.",
+		awsAuthRefresh: `aws sso login --profile ${profile}`,
+		model: "sonnet",
 		env: {
+			CLAUDE_CODE_USE_BEDROCK: "1",
 			AWS_PROFILE: profile,
 			AWS_REGION: region,
+			AWS_DEFAULT_REGION: region,
 			ANTHROPIC_DEFAULT_SONNET_MODEL: `arn:aws:bedrock:${region}:ACCOUNT_ID:application-inference-profile/SONNET_PROFILE_ID`,
 			ANTHROPIC_DEFAULT_OPUS_MODEL: `arn:aws:bedrock:${region}:ACCOUNT_ID:application-inference-profile/OPUS_PROFILE_ID`,
 			ANTHROPIC_DEFAULT_HAIKU_MODEL: `arn:aws:bedrock:${region}:ACCOUNT_ID:application-inference-profile/HAIKU_PROFILE_ID`,
+			// Per-tier capability declarations. tcc maps `xhigh_effort` → pi's
+			// "xhigh" thinking level (see src/bedrock.ts); the rest mirror Claude
+			// Code's defaults for the 4.x family. Trim if a profile's model differs.
+			ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES: "thinking,adaptive_thinking,interleaved_thinking,effort,xhigh_effort,max_effort",
+			ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES: "thinking,adaptive_thinking,interleaved_thinking,effort,max_effort",
+			ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES: "thinking",
 		},
 	};
 }

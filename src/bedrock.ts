@@ -8,11 +8,15 @@ interface BedrockSettings {
 		ANTHROPIC_DEFAULT_SONNET_MODEL?: string;
 		ANTHROPIC_DEFAULT_OPUS_MODEL?: string;
 		ANTHROPIC_DEFAULT_HAIKU_MODEL?: string;
+		ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES?: string;
+		ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES?: string;
+		ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES?: string;
 		AWS_REGION?: string;
 	};
 }
 
 type BedrockTier = "sonnet" | "opus" | "haiku";
+type ThinkingLevelMap = NonNullable<ProviderModelConfig["thinkingLevelMap"]>;
 
 interface BedrockSlot {
 	tier: BedrockTier;
@@ -20,6 +24,34 @@ interface BedrockSlot {
 	displayName: string;
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	maxTokens: number;
+	reasoning: boolean;
+	thinkingLevelMap?: ThinkingLevelMap;
+}
+
+const CAPABILITY_KEYS: Record<BedrockTier, keyof NonNullable<BedrockSettings["env"]>> = {
+	sonnet: "ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES",
+	opus: "ANTHROPIC_DEFAULT_OPUS_MODEL_SUPPORTED_CAPABILITIES",
+	haiku: "ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES",
+};
+
+// Translate a tier's Claude-Code-style capabilities string (e.g.
+// "thinking,effort,xhigh_effort,max_effort") into pi's per-model thinking
+// metadata. Two facts drive the mapping, both from the pi SDK:
+//   - `reasoning: true` already unlocks off→high; a model only loses those if
+//     it can't think at all (no `thinking` capability).
+//   - pi's thinking scale tops out at "xhigh", and that level is exposed *only*
+//     when `thinkingLevelMap.xhigh` is explicitly set (see getSupportedThinkingLevels).
+// Claude Code's `xhigh_effort` is the matching ceiling, so we map it to
+// { xhigh: "xhigh" } — which reproduces pi's own built-in registry (Opus gets
+// xhigh, Sonnet/Haiku don't). `max_effort` has no distinct slot above xhigh, so
+// it is intentionally not mapped. Missing capabilities → reasoning stays true
+// (back-compat with minimal bedrock.json files that predate these keys).
+function thinkingFor(caps: string | undefined): { reasoning: boolean; thinkingLevelMap?: ThinkingLevelMap } {
+	if (!caps) return { reasoning: true };
+	const set = new Set(caps.split(",").map((s) => s.trim()).filter(Boolean));
+	const reasoning = set.has("thinking");
+	if (reasoning && set.has("xhigh_effort")) return { reasoning, thinkingLevelMap: { xhigh: "xhigh" } };
+	return { reasoning };
 }
 
 // Per-million-token Bedrock pricing (USD). Tracking is informational; actual
@@ -70,13 +102,18 @@ export default function bedrockExtension(pi: ExtensionAPI): void {
 		opus: env?.ANTHROPIC_DEFAULT_OPUS_MODEL ?? "",
 		haiku: env?.ANTHROPIC_DEFAULT_HAIKU_MODEL ?? "",
 	};
-	const slots: BedrockSlot[] = (Object.keys(arns) as BedrockTier[]).map((tier) => ({
-		tier,
-		arn: arns[tier],
-		displayName: `${tier[0].toUpperCase()}${tier.slice(1)} (Bedrock)`,
-		cost: BEDROCK_PRICING[tier],
-		maxTokens: BEDROCK_MAX_TOKENS[tier],
-	}));
+	const slots: BedrockSlot[] = (Object.keys(arns) as BedrockTier[]).map((tier) => {
+		const thinking = thinkingFor(env?.[CAPABILITY_KEYS[tier]]);
+		return {
+			tier,
+			arn: arns[tier],
+			displayName: `${tier[0].toUpperCase()}${tier.slice(1)} (Bedrock)`,
+			cost: BEDROCK_PRICING[tier],
+			maxTokens: BEDROCK_MAX_TOKENS[tier],
+			reasoning: thinking.reasoning,
+			thinkingLevelMap: thinking.thinkingLevelMap,
+		};
+	});
 
 	const models: ProviderModelConfig[] = slots
 		.filter((s) => s.arn)
@@ -84,7 +121,8 @@ export default function bedrockExtension(pi: ExtensionAPI): void {
 			id: s.arn,
 			name: s.displayName,
 			api: "bedrock-converse-stream",
-			reasoning: true,
+			reasoning: s.reasoning,
+			...(s.thinkingLevelMap ? { thinkingLevelMap: s.thinkingLevelMap } : {}),
 			input: ["text", "image"],
 			cost: s.cost,
 			contextWindow: 200_000,
