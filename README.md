@@ -125,6 +125,7 @@ A few things worth knowing before you're deep in a session.
 |---|---|
 | `/tcc` | This reference. |
 | `/tcc:cost` · `/tcc:usage` | Session cost / token breakdown by model. |
+| `/tcc:context` | Context-window usage: total vs window, static system prompt vs conversation, and the largest TCC-injected static contributors (diagnose a bloated cached prompt). |
 | `/tcc:budget` · `/tcc:budget override` · `/tcc:budget reset session` | Cost-budget status + control. |
 | `/tcc:auth` | Same view as `tcc auth`, inside the session. |
 | `/tcc:sso [profile]` | Refresh AWS SSO without leaving tcc (browser flow runs in place). Pi's built-in `/login` is for provider OAuth, hence the namespaced name. |
@@ -317,6 +318,7 @@ scripts/lib/            shared which + mcp-catalog for the .mjs scripts
 src/extension.ts        pi extension entrypoint — composes everything below
 src/bedrock.ts          register Bedrock provider with friendly model names
 src/usage.ts            cost / token tracking + /tcc:cost /tcc:usage commands
+src/context.ts          /tcc:context — context-window breakdown
 src/budgets.ts          session + daily budget caps + /tcc:budget
 src/memory.ts           memory tools + /tcc:remember /tcc:forget + CC bridge
 src/checkpoints.ts      per-repo workflow checkpoints + /tcc:since /tcc:checkpoint
