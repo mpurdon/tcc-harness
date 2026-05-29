@@ -13,6 +13,7 @@ const TCC_COMMANDS: { name: string; summary: string; source: string }[] = [
 	{ name: "/tcc:sso", summary: "refresh AWS SSO session without leaving tcc (pi's /login is OAuth)", source: "login" },
 	{ name: "/tcc:mt", summary: "measure-twice mode — review each gated tool call with a second model", source: "measure-twice" },
 	{ name: "/tcc:onboard", summary: "scan this repo, write AGENTS.md, save project memories", source: "onboard" },
+	{ name: "/tcc:reload", summary: "reload extensions/skills/prompts/themes without restart (--plugins re-fetches marketplaces)", source: "reload" },
 	{ name: "/tcc:remember", summary: "save free-text to memory (agent picks slug + type)", source: "memory" },
 	{ name: "/tcc:retro", summary: "ask the agent to propose memories worth saving from this session", source: "retro" },
 	{ name: "/tcc:snapshot", summary: "snapshot this session to HTML at ~/.tcc/shares/ (pi's /share + /export both differ)", source: "share" },

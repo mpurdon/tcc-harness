@@ -129,6 +129,7 @@ A few things worth knowing before you're deep in a session.
 | `/tcc:budget` · `/tcc:budget override` · `/tcc:budget reset session` | Cost-budget status + control. |
 | `/tcc:auth` | Same view as `tcc auth`, inside the session. |
 | `/tcc:sso [profile]` | Refresh AWS SSO without leaving tcc (browser flow runs in place). Pi's built-in `/login` is for provider OAuth, hence the namespaced name. |
+| `/tcc:reload [--plugins]` | Reload extensions / skills / prompts / themes without restarting (picks up local SKILL.md + command edits). `--plugins` also busts the marketplace fetch cache so plugins re-pull from upstream. |
 | `/tcc:remember <text>` · `/tcc:forget <name>` | Save / delete a memory. |
 | `/tcc:checkpoint [name [set]]` | List, show, or mark workflow checkpoints. |
 | `/tcc:since <workflow>` | Re-run a workflow (e.g. `/tcc:since one-last-pass`) against changes since its last checkpoint. |
@@ -319,6 +320,7 @@ src/extension.ts        pi extension entrypoint — composes everything below
 src/bedrock.ts          register Bedrock provider with friendly model names
 src/usage.ts            cost / token tracking + /tcc:cost /tcc:usage commands
 src/context.ts          /tcc:context — context-window breakdown
+src/reload.ts           /tcc:reload — hot-reload extensions/skills/plugins
 src/budgets.ts          session + daily budget caps + /tcc:budget
 src/memory.ts           memory tools + /tcc:remember /tcc:forget + CC bridge
 src/checkpoints.ts      per-repo workflow checkpoints + /tcc:since /tcc:checkpoint
