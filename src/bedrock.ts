@@ -24,6 +24,7 @@ interface BedrockSlot {
 	displayName: string;
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
 	maxTokens: number;
+	contextWindow: number;
 	reasoning: boolean;
 	thinkingLevelMap?: ThinkingLevelMap;
 }
@@ -55,17 +56,26 @@ function thinkingFor(caps: string | undefined): { reasoning: boolean; thinkingLe
 }
 
 // Per-million-token Bedrock pricing (USD). Tracking is informational; actual
-// billing happens server-side. Update if AWS changes prices.
+// billing happens server-side. Update if AWS changes prices. Opus is the 4.5+
+// generation ($5/$25) — the older $15/$75 was Opus 4.1 pricing.
 const BEDROCK_PRICING: Record<BedrockTier, BedrockSlot["cost"]> = {
 	sonnet: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-	opus: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+	opus: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
 	haiku: { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
 };
 
 const BEDROCK_MAX_TOKENS: Record<BedrockTier, number> = {
 	sonnet: 64_000,
-	opus: 32_000,
+	opus: 128_000,
 	haiku: 8_192,
+};
+
+// Context window per tier. Opus 4.5+ runs a 1M window; Sonnet/Haiku stay at the
+// standard 200k unless a profile enables the 1M beta.
+const BEDROCK_CONTEXT_WINDOW: Record<BedrockTier, number> = {
+	sonnet: 200_000,
+	opus: 1_000_000,
+	haiku: 200_000,
 };
 
 // Canonical location is ~/.tcc/bedrock.json. ~/.claude/trajector-settings.json
@@ -110,6 +120,7 @@ export default function bedrockExtension(pi: ExtensionAPI): void {
 			displayName: `${tier[0].toUpperCase()}${tier.slice(1)} (Bedrock)`,
 			cost: BEDROCK_PRICING[tier],
 			maxTokens: BEDROCK_MAX_TOKENS[tier],
+			contextWindow: BEDROCK_CONTEXT_WINDOW[tier],
 			reasoning: thinking.reasoning,
 			thinkingLevelMap: thinking.thinkingLevelMap,
 		};
@@ -125,7 +136,7 @@ export default function bedrockExtension(pi: ExtensionAPI): void {
 			...(s.thinkingLevelMap ? { thinkingLevelMap: s.thinkingLevelMap } : {}),
 			input: ["text", "image"],
 			cost: s.cost,
-			contextWindow: 200_000,
+			contextWindow: s.contextWindow,
 			maxTokens: s.maxTokens,
 		}));
 
