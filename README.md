@@ -177,6 +177,22 @@ Discovers Claude-Code-format agent files (frontmatter `name`, `description`, `to
 
 Block or `confirm` rules wired to `tool_call`. Defaults block `rm -rf /` (and equivalents against `/etc`, `$HOME`, `/Users/<x>`), block force-push to `main`/`master`/`prod`/`release`, and `confirm` (interactive dialog) for: other force pushes, `terraform destroy`, `kubectl delete` (no `--dry-run`), `aws iam` mutations, `DROP`/`TRUNCATE`, `curl … | sh`. Overridable at `~/.tcc/permissions.json` and `<repo>/.tcc/permissions.json`.
 
+### Network egress
+
+Best-effort outbound-URL policy, configured under an `egress` key in `~/.tcc/permissions.json` (and per-repo `<repo>/.tcc/permissions.json`):
+
+```json
+{
+  "egress": {
+    "mode": "deny",
+    "allowedDomains": ["github.com", "*.amazonaws.com"],
+    "deniedDomains": ["pastebin.com"]
+  }
+}
+```
+
+`mode`: `off` (default — no enforcement), `deny` (block listed `deniedDomains`, allow the rest), or `allow` (only `allowedDomains` pass; `deniedDomains` still blocked — deny wins). Domain entries match the apex **and** subdomains (`github.com` covers `api.github.com`; a leading `*.` is optional). Enforced at two points: the `tool_call` gate scans `bash` commands and tool inputs for `http(s)` URLs, and the `research` tool checks each content-fetch target. This is a guardrail, **not** a kernel sandbox — it only gates URLs it can see in plain text, so it stops accidental/unwanted egress, not a determined adversary. Reuses the permission-rule precedence (project over global) and reloads on session start.
+
 ### Cost budgets
 
 Session + daily caps with mode `"warn" | "pause"` (default `pause`). Warnings at 80/90/95% via `ui.notify`. At 100%, the next user input is intercepted with a pause message; `/tcc:budget override` releases the lock for the rest of the session. Daily totals persisted to `~/.tcc/daily/<YYYY-MM-DD>.json` and survive across sessions. Midnight rollover handled.
@@ -269,7 +285,7 @@ Pi-ai inserts Bedrock `cachePoint` blocks on the system prompt and the last user
 | `~/.tcc/bedrock.json` | AWS profile, region, Bedrock inference-profile ARNs. Falls back to `~/.claude/trajector-settings.json` if present (legacy path). |
 | `~/.tcc/config.json` | `{ marketplaces, enabledPlugins, mcpServers, budgets, measureTwice }`. |
 | `~/.tcc/mcp.json` | `{ mcpServers: { name: { command, args, env } } }`. Managed via `tcc mcp`. |
-| `~/.tcc/permissions.json` | `{ rules: [{ name, tool, pattern, action, message }], defaults: true }`. |
+| `~/.tcc/permissions.json` | `{ rules: [{ name, tool, pattern, action, message }], defaults: true, egress: { mode, allowedDomains, deniedDomains } }`. |
 | `~/.tcc/hooks.json` | See [Hooks](#hooks). |
 | `<repo>/.tcc/{memory,checkpoints,hooks,permissions}.json` | Same shapes, per-project (override global on collision). |
 | `~/.tcc/memory/*.md` | Global memories. |
@@ -328,6 +344,7 @@ src/memory.ts           memory tools + /tcc:remember /tcc:forget + CC bridge
 src/checkpoints.ts      per-repo workflow checkpoints + /tcc:since /tcc:checkpoint
 src/hooks.ts            user-defined lifecycle hooks
 src/permissions.ts      bash command gates + default ruleset
+src/egress.ts           network egress allow/deny policy (bash + tools + research)
 src/cli-tools.ts        search_text + find_files + shell-conventions guidance
 src/git-tools.ts        git_diff_preview tool
 src/screenshot.ts       macOS screencapture tool (darwin-only)

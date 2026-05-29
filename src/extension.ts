@@ -9,6 +9,7 @@ import compactThenExtension from "./compact-then.ts";
 import contextExtension from "./context.ts";
 import debugExtension from "./debug.ts";
 import editRecoveryExtension from "./edit-recovery.ts";
+import egressExtension from "./egress.ts";
 import exitExtension from "./exit.ts";
 import freshnessExtension from "./freshness.ts";
 import gitToolsExtension from "./git-tools.ts";
@@ -60,6 +61,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 	predictiveContextExtension(pi);
 	checkpointsExtension(pi);
 	permissionsExtension(pi);
+	egressExtension(pi);
 	measureTwiceExtension(pi);
 	subagentsExtension(pi);
 	hooksExtension(pi);
