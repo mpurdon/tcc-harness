@@ -11,7 +11,7 @@ const RENDER_TICK_MS = 1_000;
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
 const COMPLETED_LINGER_MS = 3 * 60_000;
 
-type AutoStop = "mergeable";
+type AutoStop = "mergeable" | "checks" | "merged";
 
 type Kind = "pr" | "run";
 type State = "active" | "completed" | "error";
@@ -34,6 +34,22 @@ interface Watch {
 	/** Opt-in heuristic that auto-flips a watch to completed before MERGED/CLOSED.
 	 *  'mergeable' = state OPEN, mergeable MERGEABLE, no CHANGES_REQUESTED, all checks SUCCESS. */
 	autoStop?: AutoStop;
+}
+
+function isChecksSettled(pr: PrJson): boolean {
+	const checks = pr.statusCheckRollup ?? [];
+	if (checks.length === 0) return false;
+	return checks.every((c) => {
+		const s = c.conclusion ?? c.state ?? c.status;
+		return s !== "PENDING" && s !== "IN_PROGRESS" && s !== "QUEUED" && s != null;
+	});
+}
+
+function checksCompletionMsg(pr: PrJson): string {
+	const checks = pr.statusCheckRollup ?? [];
+	const pass = checks.filter((c) => (c.conclusion ?? c.state) === "SUCCESS").length;
+	const fail = checks.filter((c) => (c.conclusion ?? c.state) === "FAILURE").length;
+	return fail > 0 ? `checks done: ${pass}✓ ${fail}✗` : `checks done: ${pass}✓ all passed`;
 }
 
 function isReadyToMerge(pr: PrJson): boolean {
@@ -137,16 +153,30 @@ async function pollOne(w: Watch): Promise<void> {
 		const summary = summarize(w.kind, parsed);
 		const stateChanged = summary.statusLine !== w.statusLine && w.statusLine !== "";
 		w.statusLine = summary.statusLine;
-		if (summary.terminal && w.state === "active") {
+		// Determine whether this poll should complete the watch.
+		let completionMsg: string | undefined;
+		if (w.state === "active") {
+			if (w.kind === "pr" && w.autoStop) {
+				const pr = parsed as PrJson;
+				if (w.autoStop === "checks" && isChecksSettled(pr)) {
+					completionMsg = checksCompletionMsg(pr);
+				} else if (w.autoStop === "mergeable" && isReadyToMerge(pr)) {
+					completionMsg = "✓ ready to merge";
+				} else if (w.autoStop === "merged" && pr.state === "MERGED") {
+					completionMsg = "✓ MERGED";
+				} else if (summary.terminal && pr.state === "CLOSED") {
+					// 'merged' mode: keep watching if the PR is closed without merging — just notify.
+					uiCtx?.ui.notify(`watch ${w.id}: ✗ CLOSED without merging`, "info");
+				}
+			} else if (summary.terminal) {
+				completionMsg = summary.statusLine;
+			}
+		}
+		if (completionMsg !== undefined) {
 			w.state = "completed";
 			w.completedAt = Date.now();
-			uiCtx?.ui.notify(`watch ${w.id}: ${summary.statusLine}`, "info");
-			playNotification("done", `watch ${w.id}: ${summary.statusLine}`);
-		} else if (w.kind === "pr" && w.autoStop === "mergeable" && w.state === "active" && isReadyToMerge(parsed as PrJson)) {
-			w.state = "completed";
-			w.completedAt = Date.now();
-			uiCtx?.ui.notify(`watch ${w.id}: ✓ ready to merge (auto-stop)`, "info");
-			playNotification("done", `watch ${w.id}: ready to merge`);
+			uiCtx?.ui.notify(`watch ${w.id}: ${completionMsg}`, "info");
+			playNotification("done", `watch ${w.id}: ${completionMsg}`);
 		} else if (stateChanged) {
 			uiCtx?.ui.notify(`watch ${w.id}: ${summary.statusLine}`, "info");
 		}
@@ -342,11 +372,13 @@ export default function watchExtension(pi: ExtensionAPI): void {
 
 			if (sub === "pr") {
 				const arg = parts[1];
-				if (!arg) return ctx.ui.notify("/tcc:watch pr: usage `/tcc:watch pr <num> [mergeable]` (trailing 'mergeable' auto-stops once the PR is ready to merge)", "error");
-				const autoStop = parts[2]?.toLowerCase() === "mergeable" ? "mergeable" : undefined;
+				if (!arg) return ctx.ui.notify("/tcc:watch pr: usage `/tcc:watch pr <num> [checks|merged|mergeable]`", "error");
+				const mode = parts[2]?.toLowerCase();
+				const autoStop: AutoStop | undefined = mode === "checks" ? "checks" : mode === "merged" ? "merged" : mode === "mergeable" ? "mergeable" : undefined;
 				const result = await addPrWatch(arg, ctx.cwd, autoStop);
 				if (!result.ok) return ctx.ui.notify(`/tcc:watch pr: ${result.error}`, "error");
-				ctx.ui.notify(`watching ${result.target}${autoStop ? " (auto-stops when ready to merge)" : ""}`, "info");
+				const modeLabel = autoStop === "checks" ? " (stops when all checks settle)" : autoStop === "merged" ? " (stops on merge only)" : autoStop === "mergeable" ? " (stops when ready to merge)" : "";
+				ctx.ui.notify(`watching ${result.target}${modeLabel}`, "info");
 				return;
 			}
 
@@ -367,18 +399,19 @@ export default function watchExtension(pi: ExtensionAPI): void {
 		name: "watch_pr",
 		label: "Watch PR",
 		description:
-			"Start a background poller for a GitHub pull request. Reports state changes (merged/closed), CI check transitions, review decisions, and any new comments via UI notifications. The user sees a live widget with status and next-check countdown. Use this when the user asks to 'watch a PR', 'tell me when this PR is approved', 'let me know when CI passes', or 'notify me about comments'. Polls every 30s via `gh`. Pass autoStop='mergeable' when the user wants the watch to end as soon as the PR is ready to merge (rather than wait for the actual merge).",
+			"Start a background poller for a GitHub pull request. Reports state changes, CI check transitions, review decisions, and new comments via UI notifications and a chime. The user sees a live widget with status and next-check countdown. Use this when the user asks to 'watch a PR', 'tell me when CI passes/finishes', 'let me know when this is merged', or 'notify me about comments'. Polls every 30s via `gh`. autoStop modes: 'checks' = stop when all CI checks settle (pass or fail); 'merged' = stop only on merge (not close); 'mergeable' = stop when OPEN+mergeable+all checks pass+no review blocks. Default: watch until MERGED or CLOSED.",
 		parameters: Type.Object({
 			pr: Type.String({ description: "PR reference — bare number (e.g. '123') if in the relevant git repo, or 'owner/repo#num' for any repo." }),
-			autoStop: Type.Optional(Type.String({ description: "Optional. Set to 'mergeable' to auto-stop the watch once the PR is OPEN, mergeable, has no outstanding CHANGES_REQUESTED/REVIEW_REQUIRED, and all checks pass. Default: watch until MERGED/CLOSED." })),
+			autoStop: Type.Optional(Type.String({ description: "Optional stop condition: 'checks' (all CI checks settled), 'merged' (only on merge, not close), 'mergeable' (ready-to-merge heuristic). Default: stop on MERGED or CLOSED." })),
 		}),
 		async execute(_id, params, _signal, _u, ctx) {
 			uiCtx = ctx;
-			const autoStop = params.autoStop === "mergeable" ? "mergeable" : undefined;
+			const mode = params.autoStop;
+			const autoStop: AutoStop | undefined = mode === "checks" ? "checks" : mode === "merged" ? "merged" : mode === "mergeable" ? "mergeable" : undefined;
 			const r = await addPrWatch(params.pr, ctx.cwd, autoStop);
 			if (!r.ok) return { content: [{ type: "text", text: `watch_pr: ${r.error}` }], details: undefined, isError: true };
-			const trailer = autoStop ? " Will auto-stop once the PR is ready to merge." : "";
-			return { content: [{ type: "text", text: `Now watching ${r.target} (id ${r.id}). The user will be notified on state changes, CI transitions, and new comments. They can also see live status in the widget above the editor.${trailer}` }], details: undefined };
+			const modeLabel = autoStop === "checks" ? " Will stop and chime when all CI checks settle." : autoStop === "merged" ? " Will stop and chime on merge (keeps watching if closed without merging)." : autoStop === "mergeable" ? " Will stop and chime when the PR is ready to merge." : "";
+			return { content: [{ type: "text", text: `Now watching ${r.target} (id ${r.id}). The user will be notified on state changes, CI transitions, and new comments. They can also see live status in the widget above the editor.${modeLabel}` }], details: undefined };
 		},
 	});
 
