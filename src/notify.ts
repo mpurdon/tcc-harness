@@ -375,16 +375,6 @@ export default function notifyExtension(pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("tool_result", (event, ctx) => {
-		if (!ctx.hasUI) return;
-		if (!event.isError) return;
-		// Cooldown in playNotification keeps a fan-out of failing reviewers from
-		// spamming sounds. summary uses tool name + truncated content for the banner.
-		const text = event.content.find((c) => c.type === "text")?.text ?? "";
-		const summary = `${event.toolName}: ${text.split("\n")[0].slice(0, 120)}`;
-		playNotification("error", summary);
-	});
-
 	pi.registerCommand("tcc:notify", {
 		description: "Show/test tcc desktop notifications. Subcommands: status (default) | test [type] | generate [--force] | voices | reload",
 		handler: async (args, ctx) => {
