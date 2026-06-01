@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { playNotification } from "./notify.ts";
 import { runProcess } from "./util.ts";
 
 // Polling cadences chosen to be cheap (gh API rate limit is 5000/hr authenticated)
@@ -140,10 +141,12 @@ async function pollOne(w: Watch): Promise<void> {
 			w.state = "completed";
 			w.completedAt = Date.now();
 			uiCtx?.ui.notify(`watch ${w.id}: ${summary.statusLine}`, "info");
+			playNotification("done", `watch ${w.id}: ${summary.statusLine}`);
 		} else if (w.kind === "pr" && w.autoStop === "mergeable" && w.state === "active" && isReadyToMerge(parsed as PrJson)) {
 			w.state = "completed";
 			w.completedAt = Date.now();
 			uiCtx?.ui.notify(`watch ${w.id}: ✓ ready to merge (auto-stop)`, "info");
+			playNotification("done", `watch ${w.id}: ready to merge`);
 		} else if (stateChanged) {
 			uiCtx?.ui.notify(`watch ${w.id}: ${summary.statusLine}`, "info");
 		}
