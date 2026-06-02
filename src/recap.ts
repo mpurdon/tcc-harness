@@ -73,7 +73,7 @@ function activityBlock(state: RecapState): string {
 	return `Recent user requests (${state.turnCount} turns total):\n${prompts}\n\nTool activity: ${tally}\n\nNotable commands:\n${notable}`;
 }
 
-function wrap(text: string, width: number): string[] {
+function wordWrap(text: string, width: number): string[] {
 	const words = text.split(/\s+/);
 	const lines: string[] = [];
 	let line = "";
@@ -89,6 +89,13 @@ function wrap(text: string, width: number): string[] {
 	return lines;
 }
 
+// Visible (non-ANSI) prefix: "  ※ recap  " = 11 chars
+const PREFIX_INDENT = "  ";
+const PREFIX_LABEL = "※ recap";
+const PREFIX_GAP = "  ";
+const PREFIX_VISIBLE_LEN = PREFIX_INDENT.length + PREFIX_LABEL.length + PREFIX_GAP.length;
+const CONT_PAD = " ".repeat(PREFIX_VISIBLE_LEN);
+
 function render(state: RecapState): void {
 	const ctx = state.ctx;
 	if (!ctx?.hasUI) return;
@@ -96,9 +103,29 @@ function render(state: RecapState): void {
 		ctx.ui.setWidget(WIDGET_KEY, undefined);
 		return;
 	}
-	const width = Math.max(40, (process.stdout.columns ?? 100) - 4);
-	const lines = wrap(`※ recap: ${state.current}`, width);
-	ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "aboveEditor" });
+	const text = state.current;
+	ctx.ui.setWidget(
+		WIDGET_KEY,
+		(_tui, theme) => ({
+			render(width: number): string[] {
+				const bodyWidth = Math.max(20, width - PREFIX_VISIBLE_LEN);
+				const coloredPrefix =
+					PREFIX_INDENT +
+					theme.fg("accent", "※") +
+					" " +
+					theme.fg("muted", "recap") +
+					PREFIX_GAP;
+				const bodyLines = wordWrap(text, bodyWidth);
+				return bodyLines.map((l, i) =>
+					i === 0
+						? `${coloredPrefix}${theme.fg("muted", l)}`
+						: `${CONT_PAD}${theme.fg("muted", l)}`,
+				);
+			},
+			invalidate() {},
+		}),
+		{ placement: "aboveEditor" },
+	);
 }
 
 async function regenerate(state: RecapState): Promise<void> {
