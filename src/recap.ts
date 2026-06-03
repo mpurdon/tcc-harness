@@ -154,6 +154,13 @@ async function regenerate(state: RecapState): Promise<void> {
 	}
 }
 
+// Module-level trigger so shortcuts.ts can fire recap without importing internal state.
+let _triggerFn: ((ctx: ExtensionContext) => Promise<void>) | undefined;
+
+export function triggerRecap(ctx: ExtensionContext): Promise<void> {
+	return _triggerFn?.(ctx) ?? Promise.resolve();
+}
+
 function armIdleTimer(state: RecapState): void {
 	if (state.idleTimer) clearTimeout(state.idleTimer);
 	state.idleTimer = setTimeout(() => {
@@ -178,6 +185,13 @@ export default function recapExtension(pi: ExtensionAPI): void {
 		shownSinceLastTurn: false,
 		current: undefined,
 		idleTimer: undefined,
+	};
+
+	_triggerFn = async (ctx: ExtensionContext) => {
+		state.ctx = ctx;
+		state.shownSinceLastTurn = false;
+		ctx.ui.notify("generating recap…", "info");
+		await regenerate(state);
 	};
 
 	pi.on("session_start", (event, ctx) => {
