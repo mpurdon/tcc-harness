@@ -60,6 +60,8 @@ export default function helpExtension(pi: ExtensionAPI): void {
 			lines.push("  TCC_AUTO_UPDATE_PI=0          disable patch-only auto-update of pi (default: enabled, 6h cache)");
 			lines.push("  TCC_DEBUG=1                   write per-event JSONL to ~/.tcc/debug/<session>.log");
 			lines.push("  TCC_MEASURE_TWICE=1           review gated tool calls with a second model before executing");
+			lines.push("  TCC_AUTO_COMPACT=0            disable auto-compact at context threshold (default: on at 88%)");
+			lines.push("  TCC_AUTO_COMPACT_THRESHOLD=N  override auto-compact threshold % (default 88)");
 			lines.push("  TCC_KEEP_BUILTIN_SEARCH_TOOLS=1  keep pi's built-in grep/find tools active alongside tcc's search_text/find_files");
 			lines.push("  PI_CACHE_RETENTION=long|short Bedrock prompt-cache TTL (default: long, 1h)");
 			lines.push("  AWS_BEDROCK_FORCE_CACHE=1     force cache_control on inference-profile ARNs (default: on)");

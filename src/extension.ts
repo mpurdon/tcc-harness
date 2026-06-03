@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import askExtension from "./ask.ts";
+import autoCompactExtension from "./auto-compact.ts";
 import authStatsExtension from "./auth-stats.ts";
 import bedrockExtension from "./bedrock.ts";
 import budgetsExtension from "./budgets.ts";
@@ -25,8 +26,10 @@ import onboardExtension from "./onboard.ts";
 import permissionsExtension from "./permissions.ts";
 import predictiveContextExtension from "./predictive-context.ts";
 import recapExtension from "./recap.ts";
+import exitSummaryExtension from "./exit-summary.ts";
 import reloadExtension from "./reload.ts";
 import repoStatusExtension from "./repo-status.ts";
+import shortcutsExtension from "./shortcuts.ts";
 import researchExtension from "./research.ts";
 import retroExtension from "./retro.ts";
 import screenshotExtension from "./screenshot.ts";
@@ -67,6 +70,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 	measureTwiceExtension(pi);
 	subagentsExtension(pi);
 	hooksExtension(pi);
+	autoCompactExtension(pi);
 	loginExtension(pi);
 	researchExtension(pi);
 	freshnessExtension(pi);
@@ -87,6 +91,8 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 		contextExtension(pi);
 		reloadExtension(pi);
 		recapExtension(pi);
+		shortcutsExtension(pi);
+		exitSummaryExtension(pi);
 		notifyExtension(pi);
 		authStatsExtension(pi);
 		retroExtension(pi);

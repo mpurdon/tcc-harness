@@ -18,6 +18,10 @@ export interface TccConfig {
 	statusLine?: StatusLineOptions;
 	/** Rolling session recap widget. */
 	recap?: RecapOptions;
+	/** Auto-compact when context reaches a threshold. */
+	autoCompact?: AutoCompactOptions;
+	/** Keyboard shortcut overrides. */
+	shortcuts?: ShortcutOptions;
 }
 
 export interface RecapOptions {
@@ -36,6 +40,22 @@ export interface StatusLineOptions {
 	command?: string;
 	/** Refresh cadence in ms (min 2000, default 10000). Also refreshes on each turn end. */
 	intervalMs?: number;
+}
+
+export interface AutoCompactOptions {
+	/** Auto-compact when context reaches this percentage (default 88). TCC_AUTO_COMPACT_THRESHOLD also sets this. */
+	threshold?: number;
+	/** Set false (or TCC_AUTO_COMPACT=0) to disable. Enabled by default. */
+	enabled?: boolean;
+}
+
+export interface ShortcutOptions {
+	/** Key for /tcc:recap (default "ctrl+shift+r"). Set to "" to disable. */
+	recap?: string;
+	/** Key for session cost popup (no default). */
+	cost?: string;
+	/** Key for context-usage popup (no default). */
+	context?: string;
 }
 
 export interface McpOptions {
@@ -87,6 +107,8 @@ export function loadConfig(): TccConfig {
 			mcp: raw.mcp,
 			statusLine: raw.statusLine,
 			recap: raw.recap,
+			autoCompact: raw.autoCompact,
+			shortcuts: raw.shortcuts,
 		};
 	} catch (err) {
 		console.error(`[tcc] failed to parse ${path}: ${(err as Error).message} — using defaults`);
