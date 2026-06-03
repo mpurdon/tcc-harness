@@ -110,8 +110,35 @@ function checkSettingsFile(settings) {
 	record("ok", "settings file", `${settings.path} (profile=${env.AWS_PROFILE}, region=${env.AWS_REGION})`);
 }
 
+function checkSsoConfigFormat(profile) {
+	// The legacy SSO format (sso_start_url directly on the profile) doesn't store
+	// the OAuth clientId in the token cache, so the AWS SDK can't auto-refresh.
+	// The new sso_session format fixes this. Warn when legacy is detected so users
+	// know why they might see "Value not present for 'clientId'" errors.
+	try {
+		const cfg = readFileSync(join(homedir(), ".aws", "config"), "utf8");
+		const inProfile = new RegExp(`\\[profile ${profile}\\]([^\\[]*)`, "s").exec(cfg)?.[1] ?? "";
+		const hasNewFormat = /^\s*sso_session\s*=/m.test(inProfile);
+		const hasLegacyFormat = /^\s*sso_start_url\s*=/m.test(inProfile);
+		if (hasLegacyFormat && !hasNewFormat) {
+			record(
+				"warn",
+				"aws sso format",
+				`profile '${profile}' uses legacy SSO format — SDK cannot auto-refresh token (causes "clientId not present" errors)`,
+				`run: aws configure sso --profile ${profile}   # migrates to sso_session format`,
+			);
+		} else if (hasNewFormat) {
+			record("ok", "aws sso format", `profile '${profile}' uses sso_session format (auto-refresh supported)`);
+		}
+		// If neither found, profile may not be SSO-based — skip silently.
+	} catch {
+		// ~/.aws/config missing or unreadable — skip.
+	}
+}
+
 function checkAwsSso(settings) {
 	const profile = settings.json?.env?.AWS_PROFILE || "claude-code-bedrock";
+	checkSsoConfigFormat(profile);
 	const r = tryExec("aws", ["sts", "get-caller-identity", "--profile", profile, "--output", "json"]);
 	if (typeof r !== "string") {
 		const msg = r.error?.stderr?.toString().trim().split("\n").pop() ?? r.error?.message ?? "unknown error";
