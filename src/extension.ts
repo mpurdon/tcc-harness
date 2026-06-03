@@ -2,6 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import askExtension from "./ask.ts";
 import autoCompactExtension from "./auto-compact.ts";
 import authStatsExtension from "./auth-stats.ts";
+import bashFilterExtension from "./bash-filter.ts";
 import bedrockExtension from "./bedrock.ts";
 import budgetsExtension from "./budgets.ts";
 import checkpointsExtension from "./checkpoints.ts";
@@ -71,6 +72,7 @@ export default async function tcc(pi: ExtensionAPI): Promise<void> {
 	subagentsExtension(pi);
 	hooksExtension(pi);
 	autoCompactExtension(pi);
+	bashFilterExtension(pi);
 	loginExtension(pi);
 	researchExtension(pi);
 	freshnessExtension(pi);
