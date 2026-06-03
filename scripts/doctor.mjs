@@ -266,6 +266,7 @@ checkCliTool("fd", "brew install fd        # or apt install fd-find");
 checkCliTool("lsd", "brew install lsd       # or cargo install lsd");
 checkCliTool("gh", "brew install gh        # or see https://cli.github.com");
 checkCliTool("terminal-notifier", "brew install terminal-notifier   # nicer tcc banners — clicks open your terminal not Script Editor");
+checkCliTool("rtk", "see https://rtk-ai.app            # optional: filters verbose bash output before it hits the context window");
 checkMcpServers();
 
 const nameWidth = Math.max(...results.map((r) => r.name.length));

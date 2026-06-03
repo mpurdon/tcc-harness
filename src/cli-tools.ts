@@ -72,6 +72,9 @@ function buildShellGuidance(available: ToolPref[]): string {
 	lines.push("- `rg -n <pattern>` (line numbers, no color) when you need locations.");
 	lines.push("- `fd -t f -t d` to filter by type; default already respects `.gitignore`.");
 	lines.push("- Plain `lsd` (no `-l`/`-a` unless you need them); `lsd --tree -d 2` for shallow trees.");
+	lines.push("- When you need size+name only: `lsd -l --no-permissions --no-user --no-time` or pipe: `lsd -l | awk 'NR>1{print $4, $NF}'`.");
+	lines.push("- `git log --oneline -20` not bare `git log`; `git diff --stat` not full diff when you only need changed files.");
+	lines.push("- For test output: pipe to `| tail -50` or `| grep -E '(FAIL|ERROR|PASS|✓|✗)' | head -40` to surface only signal.");
 	lines.push("- Avoid color/pretty flags (`--color`, `-l` on `ls`, `-h` size hints) — they bloat output.");
 	lines.push("- Pipe through `| head -N` or `| wc -l` rather than dumping huge listings.");
 	return lines.join("\n");
